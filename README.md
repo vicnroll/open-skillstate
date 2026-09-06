@@ -83,7 +83,7 @@ Each worker writes only its own Σ, so nothing contends. `merge` **promotes a de
 └── state.json       # Σ
 
 .claude/skills/skill-state/    # Claude Code
-.agents/skills/skill-state/    # other agents
+.agents/skills/skill-state/    # Codex, OpenCode, other agents
 ├── SKILL.md
 └── references/schema.md       # loaded on demand
 ```
