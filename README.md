@@ -4,7 +4,7 @@ Execution state for coding agents, kept as a validated structured file instead o
 
 Based on *SKILL.state: Scalable Long-Horizon Agent Skills* ([arXiv:2608.26263v3](https://arxiv.org/html/2608.26263v3)).
 
-> **Status: design complete, not implemented.** The architecture is settled and recorded — see [`docs/arquitectura.md`](./docs/arquitectura.md) and the 16 decision records in [`docs/adr/`](./docs/adr/). The binary does not exist yet, so this README documents the design rather than a working install.
+> **Status: design complete, not implemented.** The architecture is settled and recorded — see [`docs/arquitectura.md`](./docs/arquitectura.md) and the 17 decision records in [`docs/adr/`](./docs/adr/). The binary does not exist yet, so this README documents the design rather than a working install.
 
 ## The idea
 
@@ -67,6 +67,8 @@ Each worker writes only its own Σ, so nothing contends. `merge` **promotes a de
 | `merge` | Promote a worker's Σ into the orchestrator's |
 | `migrate` | Move state between schema versions, with a backup |
 | `schema` | Print the embedded schema. `--version N` for an older one |
+
+`skillstate history` exists too, but it is deliberately absent from `--help` and from the skill: it reads a local store of everything skillstate has recorded, and the agent doing the work must never reach it. Keeping history is compatible with the pattern because O(T²) is a problem of *context*, not of *storage* — what costs tokens is chronology entering the prompt, not chronology existing on disk.
 
 A state file older than the binary keeps working, with a warning — only `migrate` changes its version, and it always runs on demand. A state file *newer* than the binary is always rejected.
 

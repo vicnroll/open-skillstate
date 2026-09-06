@@ -10,7 +10,9 @@ Compartir un Σ único entre workers deshace por la puerta de atrás el aislamie
 
 ## Relación con Brainy
 
-`brainyd` gestiona **tareas y sus estados**; `skillstate` guarda el **estado de ejecución** de la tarea que un worker tiene entre manos. Son ámbitos distintos y no se solapan. Σ es estado actual acotado, nunca un histórico: si creciera con la cronología reintroduciría el O(T²) que el patrón viene a eliminar.
+`brainyd` gestiona **tareas y sus estados**; `skillstate` guarda el **estado de ejecución** de la tarea que un worker tiene entre manos. Son ámbitos distintos y no se solapan. **Σ** es estado actual acotado, nunca un histórico: si creciera con la cronología reintroduciría el O(T²) que el patrón viene a eliminar.
+
+Eso sigue siendo cierto de Σ, pero **no de skillstate**: el histórico existe, fuera del repositorio y fuera del alcance del modelo que trabaja ([ADR 0017](./0017-historico-local-inalcanzable-desde-el-agente.md)). Lo que reintroduce el O(T²) es que la cronología entre en el prompt, no que esté guardada.
 
 ## Consequences
 

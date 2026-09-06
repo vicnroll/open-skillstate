@@ -16,6 +16,7 @@ Medir lo que confirma lo que ya se sabe es un trámite. Medir lo que puede refut
 
 ## Consequences
 
-- **Coste marginal cero.** El CLI ya lee y escribe el estado en cada operación; emitir unos pocos números por llamada no añade trabajo.
+- **Dónde va el dato lo resuelve el [ADR 0017](./0017-historico-local-inalcanzable-desde-el-agente.md)**: un almacén local fuera del repositorio, y no un fichero por proyecto. La diferencia importa porque las preguntas de arriba se contestan **cruzando proyectos**, y un registro por repositorio no las responde.
+- **Coste marginal cero.** El CLI ya lee y escribe el estado en cada operación; registrar unos pocos números por llamada no añade trabajo.
 - **No depende de Claude Code.** A diferencia de `claude_code.token.usage`, funciona igual en cualquier cliente y bajo orquestación — lo que importa dado que el enforcement ya es asimétrico por cliente ([ADR 0009](./0009-interfaz-y-garantia-portable.md)).
 - **Si algún día hiciera falta el A/B de tokens**, conviene recordar la limitación verificada: `agent.name` colapsa todos los subagentes propios al valor `"custom"`, así que separa orquestador de subagentes pero no unos subagentes de otros.

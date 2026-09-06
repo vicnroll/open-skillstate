@@ -6,7 +6,7 @@ Qué es el sistema, cómo funciona y qué garantiza. Las decisiones individuales
 |---|---|
 | **Base** | arXiv:2608.26263v3 (Badhe, Tiwari, Chung) |
 | **Estado** | Diseño cerrado, sin implementar |
-| **Decisiones** | 16 ADR en [`docs/adr/`](./adr/) |
+| **Decisiones** | 17 ADR en [`docs/adr/`](./adr/) |
 | **Verificación** | Comportamiento de Claude Code contrastado contra la documentación oficial el 2026-09-05; ver [Estado de verificación](#estado-de-verificación) |
 
 ---
@@ -87,7 +87,7 @@ Tres niveles, en lugar de un recorte ([ADR 0003](./adr/0003-esquema-por-niveles-
 |---|---|---|
 | **Núcleo** | `status`, `mode`, `objective`, `next_action`, `facts`, `decisions`, `files`, `verification` | Siempre, aunque estén vacíos |
 | **Extendido** | `hypotheses`, `blockers`, `constraints` | Sólo con contenido |
-| **Metadatos** | `schema_version` | No cuenta como contenido |
+| **Meta** | `schema_version`, `project` | Se almacenan pero `get` no los emite |
 
 `skillstate get` **es una función de renderizado, no un `cat`**: omite lo vacío (`null`, `[]`, `{}`, `""`; nunca `0` ni `false`) y emite **JSON compacto en una sola línea**. Un campo raro cuesta cero tokens cuando no se usa, y sobre todo deja de **invitar al modelo a rellenarlo**, que es el coste caro y el que ninguna telemetría capta.
 
@@ -166,7 +166,7 @@ Un orquestador como [Syntony](https://github.com/vicnroll/syntony) despacha vari
 | `migrate` | Migra el estado entre versiones de esquema, con copia de seguridad |
 | `schema` | Imprime el esquema embebido. `--version N` para uno anterior |
 
-Hay un séptimo punto de entrada, `hook`, que no es superficie de usuario: nadie lo escribe. Es por donde el cliente invoca al binario cuando dispara un evento, `skillstate hook stop` y `skillstate hook session-start`. Apunta al binario y no a un script para no reintroducir la dependencia de runtime que el [ADR 0001](./adr/0001-cli-como-binario-compilado.md) rechazó, ni un segundo sitio donde viva conocimiento del esquema ([ADR 0012](./adr/0012-init-completa-la-instalacion.md)).
+Hay además dos puntos de entrada que no son superficie de usuario. `history` es el del agente analista, oculto de `--help` y descrito en el [ADR 0017](./adr/0017-historico-local-inalcanzable-desde-el-agente.md). Y `hook` no lo escribe nadie: Es por donde el cliente invoca al binario cuando dispara un evento, `skillstate hook stop` y `skillstate hook session-start`. Apunta al binario y no a un script para no reintroducir la dependencia de runtime que el [ADR 0001](./adr/0001-cli-como-binario-compilado.md) rechazó, ni un segundo sitio donde viva conocimiento del esquema ([ADR 0012](./adr/0012-init-completa-la-instalacion.md)).
 
 `init` **completa la instalación**, incluida la sección en `CLAUDE.md`/`AGENTS.md` dentro de un bloque delimitado e idempotente ([ADR 0012](./adr/0012-init-completa-la-instalacion.md)). Con TTY pregunta; sin TTY exige `--write-instructions` o `--no-write-instructions` y falla si no recibe ninguna, porque un `init` headless que decide en silencio es peor que uno que se detiene diciendo qué falta.
 
@@ -176,9 +176,18 @@ Hay un séptimo punto de entrada, `hook`, que no es superficie de usuario: nadie
 
 ## Instrumentación
 
-Se mide **el estado, no los tokens** ([ADR 0010](./adr/0010-se-instrumenta-el-estado-no-los-tokens.md)): tamaño de Σ en el tiempo, qué campos se usan de verdad, cuántos casi-duplicados aparecen, con qué frecuencia falla `merge`. Lo emite el propio CLI, sin telemetría del cliente ni corpus de tareas.
+Se mide **el estado, no los tokens** ([ADR 0010](./adr/0010-se-instrumenta-el-estado-no-los-tokens.md)): tamaño de Σ en el tiempo, qué campos se usan de verdad, cuántos casi-duplicados aparecen, con qué frecuencia falla `merge`. El criterio es cuál de las dos mediciones puede **cambiar una decisión ya tomada**: el ahorro de tokens del paper no está en duda y reproducirlo no alteraría nada, mientras que la promoción por campo del ADR 0006 no distingue hechos durables de hechos locales y nadie sabe todavía si eso resulta ruidoso.
 
-El criterio es cuál de las dos mediciones puede **cambiar una decisión ya tomada**. El ahorro de tokens del paper no está en duda y reproducirlo no alteraría nada de lo diseñado. En cambio la promoción por campo del ADR 0006 no distingue hechos durables de hechos locales dentro de `facts`, y nadie sabe todavía si eso resulta ruidoso.
+Todo eso, y además los pasos, decisiones y acciones, se guardan en un **almacén local en SQLite fuera del repositorio** ([ADR 0017](./adr/0017-historico-local-inalcanzable-desde-el-agente.md)). Fuera del repositorio porque las preguntas que justifican medir se contestan **cruzando proyectos**, y un registro por repositorio no las responde. El proyecto se identifica por el campo `project`, no por su ruta, así que mudar el repositorio no parte la serie.
+
+```text
+   skillstate  ──escribe──▶  histórico local  ◀──lee──  skillstate history
+   (el agente lo usa)         (SQLite, WAL)             (oculto; agente analista)
+```
+
+**El agente que trabaja no puede alcanzarlo.** Ningún comando de `skillstate` devuelve datos del histórico — ni resumidos, ni como contexto — y ni el skill ni `--help` lo mencionan. Guardar cronología no contradice el patrón porque el O(T²) es un problema de *contexto*, no de *almacenamiento*: lo que hace daño es que la cronología **entre en el prompt**. La skill del agente analista se instala aparte y en otro ámbito, nunca en el repositorio del proyecto, porque una skill vecina que ofrezca «todo lo registrado» se invocaría sola justo cuando el agente creyera necesitar contexto previo.
+
+El precio, dicho sin adornos: el almacén contiene **contenido del proyecto**, no sólo recuentos, y sobrevive a borrar el repositorio. Por eso `history purge` es parte del diseño y no un extra, y por eso exportar métricas y exportar contenido tendrán que ser caminos distintos cuando llegue OTLP.
 
 ---
 

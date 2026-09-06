@@ -5,8 +5,11 @@
   "description": "Sigma: bounded current execution state. Never a transcript, never a chronology. x-tier controls serialization in `skillstate get`; x-promote controls what `skillstate merge` lifts from a worker to the orchestrator.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "status", "mode"],
-
+  "required": [
+    "schema_version",
+    "status",
+    "mode"
+  ],
   "$defs": {
     "slug": {
       "type": "string",
@@ -15,11 +18,14 @@
     },
     "slugMap": {
       "type": "object",
-      "propertyNames": { "$ref": "#/$defs/slug" },
-      "additionalProperties": { "type": "string" }
+      "propertyNames": {
+        "$ref": "#/$defs/slug"
+      },
+      "additionalProperties": {
+        "type": "string"
+      }
     }
   },
-
   "properties": {
     "schema_version": {
       "type": "integer",
@@ -27,31 +33,51 @@
       "x-tier": "meta",
       "description": "A value newer than the binary understands is always rejected, never guessed at."
     },
-
+    "project": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "x-tier": "meta",
+      "description": "Stable project name, used to key the local history store. Independent of paths, so moving the repository does not split the series; renaming is an ordinary patch."
+    },
     "status": {
-      "enum": ["idle", "active", "blocked", "completed"],
+      "enum": [
+        "idle",
+        "active",
+        "blocked",
+        "completed"
+      ],
       "x-tier": "core",
       "x-promote": false
     },
     "mode": {
-      "enum": ["execution", "exploration"],
+      "enum": [
+        "execution",
+        "exploration"
+      ],
       "default": "execution",
       "x-tier": "core",
       "x-promote": false,
       "description": "In exploration the Stop hook does not require a concrete next_action."
     },
     "objective": {
-      "type": ["string", "null"],
+      "type": [
+        "string",
+        "null"
+      ],
       "x-tier": "core",
       "x-promote": false
     },
     "next_action": {
-      "type": ["string", "null"],
+      "type": [
+        "string",
+        "null"
+      ],
       "x-tier": "core",
       "x-promote": false,
       "description": "One concrete step, actionable by a fresh session with no prior transcript."
     },
-
     "facts": {
       "$ref": "#/$defs/slugMap",
       "x-tier": "core",
@@ -62,17 +88,21 @@
       "x-tier": "core",
       "x-promote": true
     },
-
     "files": {
       "type": "object",
       "additionalProperties": false,
       "x-tier": "core",
       "properties": {
-        "relevant": { "$ref": "#/$defs/slugMap", "x-promote": false },
-        "modified": { "$ref": "#/$defs/slugMap", "x-promote": true }
+        "relevant": {
+          "$ref": "#/$defs/slugMap",
+          "x-promote": false
+        },
+        "modified": {
+          "$ref": "#/$defs/slugMap",
+          "x-promote": true
+        }
       }
     },
-
     "verification": {
       "type": "object",
       "additionalProperties": false,
@@ -81,34 +111,68 @@
       "properties": {
         "checks": {
           "type": "object",
-          "propertyNames": { "$ref": "#/$defs/slug" },
+          "propertyNames": {
+            "$ref": "#/$defs/slug"
+          },
           "additionalProperties": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["name", "result"],
+            "required": [
+              "name",
+              "result"
+            ],
             "properties": {
-              "name": { "type": "string" },
-              "result": { "enum": ["passed", "failed", "not_run"] },
-              "details": { "type": "string" }
+              "name": {
+                "type": "string"
+              },
+              "result": {
+                "enum": [
+                  "passed",
+                  "failed",
+                  "not_run"
+                ]
+              },
+              "details": {
+                "type": "string"
+              }
             }
           }
         },
-        "overall": { "enum": ["not_run", "partial", "passed", "failed"] }
+        "overall": {
+          "enum": [
+            "not_run",
+            "partial",
+            "passed",
+            "failed"
+          ]
+        }
       }
     },
-
     "hypotheses": {
       "type": "object",
       "x-tier": "extended",
       "x-promote": false,
-      "propertyNames": { "$ref": "#/$defs/slug" },
+      "propertyNames": {
+        "$ref": "#/$defs/slug"
+      },
       "additionalProperties": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["statement", "status"],
+        "required": [
+          "statement",
+          "status"
+        ],
         "properties": {
-          "statement": { "type": "string" },
-          "status": { "enum": ["open", "confirmed", "rejected"] }
+          "statement": {
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "open",
+              "confirmed",
+              "rejected"
+            ]
+          }
         }
       }
     },

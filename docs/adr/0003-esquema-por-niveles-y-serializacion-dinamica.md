@@ -10,6 +10,7 @@ El análisis previo criticaba que el esquema tuviera trece campos, porque Σ via
 
 - **Núcleo** — `status`, `objective`, `next_action`, `facts`, `decisions`, `files`, `verification`. Documentados en detalle en el skill y **serializados siempre**, aunque estén vacíos: el esqueleto le enseña al modelo la forma del estado que debe mantener, y la ausencia de `next_action` sería ambigua justo donde el hook `Stop` necesita distinguir «no hay siguiente paso» de «se olvidó de ponerlo».
 - **Extendido** — `hypotheses`, `blockers`, `constraints`. Validan igual que el núcleo, pero **sólo se serializan cuando tienen contenido**, y el skill los menciona en una línea en vez de describirlos, apoyándose en la revelación progresiva.
+- **Meta** — `schema_version` y `project`. Se validan y se almacenan, pero **`get` no los emite**: al modelo no le sirve de nada saber la versión del esquema ni el nombre interno del proyecto, y serían bytes en todos los prompts.
 - **Cortados** — `phase` y `acceptance_criteria`, eliminados del esquema. No son raros, son **redundantes**: `phase` no aporta nada que `status` no exprese ya, y `acceptance_criteria` es `verification` escrito antes de ejecutarlo. Un campo redundante se rellena *y* cuesta tokens; ningún renderizado dinámico arregla eso.
 
 La regla que separa los dos primeros niveles del tercero: **omitir lo raro, cortar lo redundante.**
