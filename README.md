@@ -4,7 +4,7 @@ Execution state for coding agents, kept as a validated structured file instead o
 
 Based on *SKILL.state: Scalable Long-Horizon Agent Skills* ([arXiv:2608.26263v3](https://arxiv.org/html/2608.26263v3)).
 
-> **Status: design complete, not implemented.** The architecture is settled and recorded — see [`docs/arquitectura.md`](./docs/arquitectura.md) and the 14 decision records in [`docs/adr/`](./docs/adr/). The binary does not exist yet, so this README documents the design rather than a working install.
+> **Status: design complete, not implemented.** The architecture is settled and recorded — see [`docs/arquitectura.md`](./docs/arquitectura.md) and the 15 decision records in [`docs/adr/`](./docs/adr/). The binary does not exist yet, so this README documents the design rather than a working install.
 
 ## The idea
 
@@ -66,6 +66,9 @@ Each worker writes only its own Σ, so nothing contends. `merge` **promotes a de
 | `init` | Install into a repository |
 | `merge` | Promote a worker's Σ into the orchestrator's |
 | `migrate` | Move state between schema versions, with a backup |
+| `schema` | Print the embedded schema. `--version N` for an older one |
+
+A state file older than the binary keeps working, with a warning — only `migrate` changes its version, and it always runs on demand. A state file *newer* than the binary is always rejected.
 
 ## Limits
 
@@ -79,11 +82,12 @@ Each worker writes only its own Σ, so nothing contends. `merge` **promotes a de
 
 ```text
 .skillstate/
-├── schema.json      # the schema the CLI owns
-└── state.json       # Σ
+└── state.json       # Σ — the only file init writes here
 
 .claude/skills/skill-state/    # Claude Code
 .agents/skills/skill-state/    # Codex, OpenCode, other agents
 ├── SKILL.md
 └── references/schema.md       # loaded on demand
 ```
+
+The schema is not installed. The binary embeds every version it knows and applies the one matching each project's `schema_version`, so a project cannot drift from — or quietly relax — the contract the CLI validates against. `skillstate schema` prints it.

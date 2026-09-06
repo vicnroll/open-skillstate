@@ -12,6 +12,14 @@ Un `init` que termina diciendo «instalación completada» y deja al usuario un 
 
 El criterio general es instalar en la convención compartida siempre, y añadir una ruta propietaria sólo cuando un cliente no lea la compartida. Multiplicar copias del mismo fichero por cliente no añade compatibilidad, añade sitios donde el contenido puede divergir sin que nadie lo note.
 
+## Los hooks apuntan al binario, no a scripts
+
+La configuración de hooks que `init` escribe apunta al propio binario — `skillstate hook stop`, `skillstate hook session-start` — y no a un script empaquetado en el repositorio.
+
+El motivo es el mismo que sostiene el [ADR 0001](./0001-cli-como-binario-compilado.md). Un script de hook tendría que leer el estado para decidir si bloquea, y para eso necesita `jq`, `python` o parsear JSON en bash: reintroduce por la puerta de atrás la dependencia de runtime que se rechazó para el CLI, y en repositorios de cualquier stack. Además pondría conocimiento del esquema en un segundo sitio, capaz de desincronizarse del binario sin que nada lo detecte — que es exactamente la razón por la que el esquema no se copia al repositorio ([ADR 0015](./0015-el-esquema-vive-dentro-del-binario.md)).
+
+`hook` no forma parte de la superficie de usuario: nadie lo escribe nunca. Es el punto de entrada por el que el cliente invoca al binario, y por eso no aparece en la tabla de comandos.
+
 ## Consentimiento sin romper la ejecución headless
 
 Editar ficheros que el usuario ha escrito exige permiso, pero pedirlo por consola rompería la llamada desde un orquestador headless como Syntony. Se resuelve por detección de TTY:

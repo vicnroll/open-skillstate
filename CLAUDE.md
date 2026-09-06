@@ -11,9 +11,10 @@ This repository designs and (soon) implements `skillstate`: execution state for 
 | | |
 |---|---|
 | `docs/arquitectura.md` | What the system is and how it works, as a whole |
-| `docs/adr/` | The 14 design decisions and why each was made |
+| `docs/adr/` | The 15 design decisions and why each was made |
 | `CONTEXT.md` | Project vocabulary. Check terms here before inventing new ones |
-| `skills/` | The payload `init` will install: skill, schema, initial state, instruction fragment |
+| `skills/` | The payload `init` will install: skill, initial state, instruction fragment |
+| `schema/` | The schema versions the binary embeds. Source, not payload — never installed |
 | `.skillstate/state.json` | Working state for the design effort itself |
 
 **Do not re-argue what the ADRs already settle.** If you believe a decision is wrong, say so and cite the ADR; do not silently design around it.

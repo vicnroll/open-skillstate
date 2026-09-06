@@ -6,7 +6,7 @@ status: accepted
 
 El hook `Stop` bloquea el cierre del turno cuando `status` sigue en `active` sin un `next_action` concreto, que es la propiedad de reanudabilidad que sostiene el patrón. Pero se verificó contra la documentación que **el bloqueo no es incondicional**: está topado en ocho veces consecutivas y la entrada del hook incluye un campo `stop_hook_active` para detectar la reentrada. No puede garantizar nada; sólo puede insistir un número acotado de veces.
 
-Se decide **un solo empujón**: bloquea la primera vez, y si vuelve a entrar con `stop_hook_active: true`, cede.
+Se decide **un solo empujón**: bloquea la primera vez, y si vuelve a entrar con `stop_hook_active: true`, cede. Quien lo evalúa es el propio binario, invocado como `skillstate hook stop` ([ADR 0012](./0012-init-completa-la-instalacion.md)); no hay script intermedio con lógica propia.
 
 El hook existe para atrapar un **olvido** — el modelo terminó y no dejó `next_action`. Un recordatorio arregla un olvido. Si tras el recordatorio el turno sigue queriendo cerrarse, ya no es un olvido sino una decisión, y pelearse con ella siete veces más agota el presupuesto de bloqueos, frustra al usuario y no arregla nada. Diseñarlo como barrera dura lo convierte en una trampa.
 

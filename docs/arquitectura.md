@@ -6,7 +6,7 @@ Qué es el sistema, cómo funciona y qué garantiza. Las decisiones individuales
 |---|---|
 | **Base** | arXiv:2608.26263v3 (Badhe, Tiwari, Chung) |
 | **Estado** | Diseño cerrado, sin implementar |
-| **Decisiones** | 14 ADR en [`docs/adr/`](./adr/) |
+| **Decisiones** | 15 ADR en [`docs/adr/`](./adr/) |
 | **Verificación** | Comportamiento de Claude Code contrastado contra la documentación oficial el 2026-09-05; ver [Estado de verificación](#estado-de-verificación) |
 
 ---
@@ -93,6 +93,8 @@ Tres niveles, en lugar de un recorte ([ADR 0003](./adr/0003-esquema-por-niveles-
 
 `status` es `idle` | `active` | `blocked` | `completed`. `mode` es `execution` | `exploration`, y son ortogonales: `active`+`exploration` es depurar en mitad de una tarea ([ADR 0007](./adr/0007-modo-de-operacion-dentro-del-estado.md)).
 
+El esquema **no se instala en el repositorio**: el binario embebe todas las versiones que conoce y aplica a cada proyecto la que indica su `schema_version` ([ADR 0015](./adr/0015-el-esquema-vive-dentro-del-binario.md)). Una copia por proyecto volvería nominal la propiedad del esquema —bastaría relajarla ahí para que el binario aceptase en ese repositorio lo que rechaza en los demás— y abriría un segundo frente de deriva junto al estado. `skillstate schema` lo imprime para auditarlo o para alimentar un servidor MCP.
+
 ---
 
 ## Garantías, por nivel
@@ -158,10 +160,13 @@ Un orquestador como [Syntony](https://github.com/vicnroll/syntony) despacha vari
 | `init` | Instala el kit en el repositorio |
 | `merge` | Promueve el Σ de un worker al del orquestador |
 | `migrate` | Migra el estado entre versiones de esquema, con copia de seguridad |
+| `schema` | Imprime el esquema embebido. `--version N` para uno anterior |
+
+Hay un séptimo punto de entrada, `hook`, que no es superficie de usuario: nadie lo escribe. Es por donde el cliente invoca al binario cuando dispara un evento, `skillstate hook stop` y `skillstate hook session-start`. Apunta al binario y no a un script para no reintroducir la dependencia de runtime que el [ADR 0001](./adr/0001-cli-como-binario-compilado.md) rechazó, ni un segundo sitio donde viva conocimiento del esquema ([ADR 0012](./adr/0012-init-completa-la-instalacion.md)).
 
 `init` **completa la instalación**, incluida la sección en `CLAUDE.md`/`AGENTS.md` dentro de un bloque delimitado e idempotente ([ADR 0012](./adr/0012-init-completa-la-instalacion.md)). Con TTY pregunta; sin TTY exige `--write-instructions` o `--no-write-instructions` y falla si no recibe ninguna, porque un `init` headless que decide en silencio es peor que uno que se detiene diciendo qué falta.
 
-`migrate` es siempre explícito, y un `schema_version` más nuevo que el binario se rechaza siempre ([ADR 0014](./adr/0014-migracion-explicita-de-schema-version.md)).
+`migrate` es siempre explícito ([ADR 0014](./adr/0014-migracion-explicita-de-schema-version.md)). Un `schema_version` más nuevo que el binario se rechaza siempre; uno **más antiguo opera con normalidad**, avisando, porque el binario lleva ese esquema embebido y sabe validar contra él — bloquear hasta migrar mataría al worker headless que no tiene ningún humano detrás. La ventana de operación de una versión es acotada; la de migración es indefinida, porque `migrate` necesita el esquema de origen y retirarlo dejaría proyectos varados sin camino de salida. Las migraciones se componen de saltos consecutivos, de modo que cada versión nueva cuesta uno.
 
 ---
 
