@@ -6,30 +6,27 @@ status: accepted
 
 RFC 7386 (JSON Merge Patch) fusiona objetos de forma recursiva pero **reemplaza los arrays enteros**, así que con listas planas añadir un solo hecho obligaría al modelo a reenviar la colección completa en cada parche — el coste en tokens crecería con el tamaño de Σ justo en los campos que más crecen. Se decide modelar `facts`, `decisions`, `blockers` y `files.*` como objetos cuyas claves son slugs derivados del contenido (`auth-en-middleware`), de modo que el borrado por `null` del RFC opera a nivel de ítem **sin ninguna extensión propia** y el tamaño del parche pasa a ser proporcional a los cambios, no al estado.
 
-Las claves las genera el modelo, no el CLI: que el CLI las asignara exigiría sintaxis fuera del estándar para expresar «esto es nuevo», que es precisamente la extensión `$append`/`$remove` descartada. La convención es mecánica y la valida el CLI con expresión regular — kebab-case, 2 a 4 palabras, sin acentos, `^[a-z0-9]+(-[a-z0-9]+){0,3}$`.
+Las claves las genera el modelo, no el CLI: que el CLI las asignara exigiría sintaxis fuera del estándar para expresar «esto es nuevo», que es precisamente la extensión `$append`/`$remove` descartada. La convención es mecánica y la valida el CLI con expresión regular — kebab-case, **1 a 4 palabras**, sin acentos, `^[a-z0-9]+(-[a-z0-9]+){0,3}$`.
+
+Una sola palabra es válida cuando ya identifica el contenido sin ambigüedad (`readme`, `arquitectura`, `licencia`). Obligar a dos palabras no compra ninguna propiedad del sistema y empuja a inventar prefijos artificiales sólo para satisfacer la forma.
 
 ## Qué hace el CLI con un slug mal escrito
 
 La convención es estricta a propósito, así que `patch` iba a rechazar a menudo, y su mensaje de error es el **único canal** por el que el modelo se entera de qué hizo mal. Eso importa más de lo que parece: si el mensaje no permite corregir, la salida obvia del modelo es escribir el fichero a mano — es decir, un mal error empuja justo hacia el fallo que todo el diseño evita, y que por el [ADR 0009](./0009-interfaz-y-garantia-portable.md) sabemos que pasa desapercibido si deja el fichero bien formado.
 
-Se midió el patrón contra 17 slugs plausibles antes de decidir. Rechaza 11, pero el reparto de causas es muy desigual:
+Se midió el patrón contra 17 slugs plausibles antes de decidir. La mayoría de los rechazos eran mecánicamente corregibles: mayúsculas, `_`, acentos, caracteres especiales o guiones extra. Los únicos casos que exigen juicio son los que superan cuatro palabras, porque ahí el CLI tendría que decidir qué contenido recortar.
 
-| | Casos | Ejemplos |
-|---|---|---|
-| Mecánicamente corregibles | **9** | `Q1-cerrada`, `schemaVersion-mismatch`, `staging_db_unreachable`, `migracion-explícita`, `test.go-fails`, `auth--in-middleware`, `-auth-middleware` |
-| Requieren juicio | 2 | `handle-rate-limit-errors-gracefully`, `parser-nil-check-line-88` — cinco palabras, hay que decidir qué se recorta |
-
-Casi todo lo que se rechaza es **tipografía, no contenido**: no indica que el modelo entendiera mal lo que guardaba, sólo que lo escribió con otra convención. Se decide **normalizar lo mecánico y rechazar sólo lo que exige juicio**: minúsculas, `_` → `-`, sin acentos, sin caracteres especiales, guiones colapsados y recortados en los extremos. La forma canónica almacenada es siempre `esto-es-un-slug`.
+Se decide **normalizar lo mecánico y rechazar sólo lo que exige juicio**: minúsculas, `_` → `-`, sin acentos, sin caracteres especiales, guiones colapsados y recortados en los extremos. La forma canónica almacenada es siempre `esto-es-un-slug`.
 
 Gastar un reintento —y en headless a veces la tarea entera— en corregir un guion bajo sería asignarle al modelo el trabajo mecánico que el [ADR 0006](./0006-merge-promueve-un-subconjunto-y-falla-ruidoso.md) asignó al CLI.
 
-**Lo que no se relaja en ningún caso**: el límite de 2 a 4 palabras, `additionalProperties: false`, los `enum`, y la estructura del parche. Se normaliza cómo está escrito el slug, nunca qué dice ni qué forma tiene el parche.
+**Lo que no se relaja en ningún caso**: el límite de 1 a 4 palabras, `additionalProperties: false`, los `enum`, y la estructura del parche. Se normaliza cómo está escrito el slug, nunca qué dice ni qué forma tiene el parche.
 
 ### El punto donde normalizar debe fallar ruidoso
 
 Si un mismo parche trae `auth_in_middleware` y `auth-in-middleware`, ambos canonicalizan a la misma clave y uno pisaría al otro **en silencio** — pérdida de datos, que es exactamente lo que el ADR 0006 se negó a aceptar en `merge`. Ante una colisión por normalización se rechaza el parche entero y se listan las claves implicadas.
 
-El orden de operaciones queda: **normalizar → detectar colisiones → fusionar → validar el resultado**. Validar el resultado y no el parche es obligatorio: un parche con `null` para borrar un ítem no validaría nunca contra el esquema, porque ahí se espera una cadena.
+El orden de operaciones queda: **normalizar → detectar colisiones → fusionar → canonicalizar el documento → validar el resultado**. Validar el resultado y no el parche es obligatorio: un parche con `null` para borrar un ítem no validaría nunca contra el esquema, porque ahí se espera una cadena. La canonicalización posterior está definida en el [ADR 0003](./0003-esquema-por-niveles-y-serializacion-dinamica.md).
 
 Y el parche se aplica **entero o nada**. Una aplicación parcial dejaría al modelo creyendo que guardó cosas que no guardó, que es peor que un rechazo limpio.
 

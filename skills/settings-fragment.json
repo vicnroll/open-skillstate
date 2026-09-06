@@ -1,10 +1,9 @@
 {
-  "_comment": "What `skstate init` merges into .claude/settings.json. It never overwrites: existing deny rules and hooks are kept, these are added alongside. What was inserted is recorded in .openskillstate/installed.json so that re-running init replaces instead of duplicating, and uninstall knows what to remove (ADR 0012). Verify the hook object shape against the Claude Code hooks reference before shipping; the deny syntax and its reach over bash and redirections are confirmed, arbitrary subprocesses are deliberately not covered (ADR 0009).",
+  "_comment": "What skstate init merges into .claude/settings.json. It never overwrites: existing deny rules and hooks are kept, these are added alongside. What was inserted is recorded in .openskillstate/installed.json so re-running init replaces instead of duplicating, uninstall removes only client integration, and deinit can remove the project completely (ADR 0012). Claude Code path permissions are checked against Edit(path) and Read(path); Write(path) rules are not consulted for file paths. The leading slash anchors this rule to the primary working directory in project settings (ADR 0009).",
 
   "permissions": {
     "deny": [
-      "Edit(./.openskillstate/**)",
-      "Write(./.openskillstate/**)"
+      "Edit(/.openskillstate/**)"
     ]
   },
 

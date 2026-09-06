@@ -4,44 +4,44 @@ status: accepted
 
 # El rol de worker se declara al crearlo, no en cada invocación
 
-La topología del [ADR 0005](./0005-estado-jerarquico-bajo-orquestacion.md) pone dos Σ en juego, y el [ADR 0008](./0008-politica-de-git-para-el-estado.md) los obliga a tener nombres distintos — `state.json` versionado, `worker-state.json` efímero — porque los worktrees comparten el `.gitignore` del repositorio. Faltaba lo operativo: **cómo sabe el binario sobre cuál de los dos opera**. Equivocarse tiene el peor modo de fallo del diseño: un worker escribiendo sobre el estado versionado reintroduce en silencio el conflicto entre Git y la fusión semántica que el ADR 0008 existe para evitar, y no se descubre hasta integrar.
+La topología del [ADR 0005](./0005-estado-jerarquico-bajo-orquestacion.md) pone dos Σ en juego, y el [ADR 0008](./0008-politica-de-git-para-el-estado.md) los obliga a tener nombres distintos — `state.json` versionado, `worker-state.json` efímero — porque los worktrees comparten el `.gitignore` del repositorio. Faltaba lo operativo: **cómo sabe el binario sobre cuál de los dos opera**. Equivocarse tiene el peor modo de fallo del diseño: un worker escribiendo sobre el estado consolidado reintroduce en silencio el conflicto entre Git y la promoción semántica.
 
-Se decide que el rol se declare **una vez, al crear el worker**, con `skstate init --worker` en su worktree. A partir de ahí no hay nada que recordar: **si existe `worker-state.json`, se opera sobre él**; si sólo existe `state.json`, se opera sobre ese. La instrucción vive en el cuerpo del `SKILL.md` apuntando a `references/orchestration.md`, siguiendo la revelación progresiva del [ADR 0003](./0003-esquema-por-niveles-y-serializacion-dinamica.md).
+Se decide que el rol se declare **una vez, al crear el worker**, con `skstate init --worker` en su espacio aislado. A partir de ahí no hay nada que recordar: **si existe `worker-state.json`, se opera sobre él**; si sólo existe `state.json`, se opera sobre ese. La instrucción vive en el cuerpo del `SKILL.md` apuntando a `references/orchestration.md`, siguiendo la revelación progresiva del [ADR 0003](./0003-esquema-por-niveles-y-serializacion-dinamica.md).
+
+El worker **hereda el `project_id`** del estado consolidado y nunca crea una identidad nueva ([ADR 0019](./0019-identidad-estable-del-proyecto.md)).
 
 ## Por qué no una variable de entorno
 
-Era la propuesta más limpia en apariencia: el orquestador lanza `SKSTATE_ROLE=worker claude -p …` y todo `skstate` que se ejecute dentro lo hereda sin que el modelo sepa que existe. Pero convierte la corrección de OpenSkillState en **algo que cada orquestador tiene que implementar**, y eso es el mismo error que el [ADR 0009](./0009-interfaz-y-garantia-portable.md) ya rechazó al descartar la prevención vía `deny` como garantía portable: una propiedad que depende de que el entorno coopere no es una propiedad, es una esperanza.
+Una variable como `SKSTATE_ROLE=worker` parece limpia: quien lanza el proceso la inyecta y el modelo ni siquiera necesita saber que existe. Pero convierte la corrección de OpenSkillState en **algo que cada consumidor externo tiene que implementar**. Eso contradice el objetivo de ser agnóstico del orquestador: un runtime que no conozca OpenSkillState se comportaría mal sin aviso.
 
-El coste es concreto y comprobable. Orca orquesta con worktrees y no conoce OpenSkillState. Syntony habría que modificarlo. Cualquier orquestador futuro, igual. Y mientras no lo hagan, el comportamiento es incorrecto sin avisar. Un kit que aspira a ser agnóstico del orquestador no puede pedirle al orquestador que lo conozca.
+La declaración persistente evita ese acoplamiento. Cualquier sistema capaz de crear un directorio de trabajo puede ejecutar una vez `skstate init --worker`; a partir de ahí el workspace se describe a sí mismo.
 
 ## Por qué tampoco un flag en cada llamada
 
-La alternativa era enseñar en el skill que todo `skstate patch` dentro de un worker lleve `--worker`. Se descartó por la **forma de la obligación**, no por desconfianza en el modelo:
+La alternativa era enseñar que todo `skstate patch` dentro de un worker lleve `--worker`. Se descarta por la forma de la obligación:
 
 | | Cuándo dispara | Qué compite con ella |
 |---|---|---|
-| «Orquestas → declara el worker» | Al crear el worker, un acto deliberado que el agente está ejecutando | Nada: la regla se activa mientras el agente hace justo eso |
-| `--worker` en cada `patch` | En cada llamada, la mayoría sin relación con orquestar | Todo lo demás del contexto, en la llamada cuarenta y tras una compactación |
+| «Creas un worker → decláralo» | Al crear el espacio aislado | Nada: la regla se activa durante esa acción concreta |
+| `--worker` en cada `patch` | En cada llamada posterior | Todo lo demás del contexto, incluso tras compactación o sesión nueva |
 
-La primera es una regla condicional sobre una acción concreta y funciona bien en la práctica — hay orquestadores basados en skills que despachan miles de workers con protocolos bastante más delicados que este. La segunda es una obligación ambiente, y además el mismo `SKILL.md` se ejecuta bajo `claude -p`, `codex exec` y `opencode`, con fiabilidades distintas.
+La primera persiste una decisión una sola vez; la segunda convierte una propiedad estructural del workspace en memoria procedimental repetida.
 
 ## Por qué la detección de Git avisa pero no decide
 
-Se comprobó empíricamente el mecanismo:
+En Git puede detectarse un worktree comparando `gitdir` y `commondir`, pero no sirve como mecanismo universal. Un submódulo también puede tener `.git` como fichero y un orquestador puede aislar con contenedores o copias sin usar worktrees.
 
-| Situación | `--git-dir` vs `--git-common-dir` | `.git` es |
-|---|---|---|
-| Repositorio normal | iguales | directorio |
-| Worktree | **distintos** | fichero |
-| Submódulo | iguales | **fichero** |
-| Fuera de un repositorio | el comando falla | no existe |
-
-Funciona, pero no puede ser el mecanismo de decisión por dos motivos. El atajo evidente —«si `.git` es un fichero, es un worktree»— es **incorrecto**, porque un submódulo también lo es. Y sobre todo, sólo cubre el aislamiento por worktree: si un orquestador aísla con contenedores o copias del repositorio, no hay nada que detectar y el fallo vuelve a ser silencioso.
-
-Se queda como **red de seguridad gratuita**: si esto parece un worktree y nadie declaró un worker, avisar fuerte. No decide, no acopla, y convierte el único hueco de la declaración explícita en ruidoso en lugar de silencioso.
+La detección se queda como **red de seguridad**: si el directorio parece un worktree y nadie declaró un worker, `check` avisa fuerte. No decide el rol y no convierte Git en requisito del producto.
 
 ## Consequences
 
-- **La ambigüedad de los dos ficheros se resuelve con una línea.** Un worktree tiene el `state.json` versionado *y* el `worker-state.json` propio; gana el del worker.
-- **No hace falta invocar al binario `git`.** Leer el fichero `.git`, seguir su puntero `gitdir:` y compararlo con `commondir` son unas veinte líneas y cero dependencias externas — coherente con el [ADR 0001](./0001-cli-como-binario-compilado.md), y funciona en una imagen mínima sin `git` instalado.
-- **La declaración persiste como estado, no como instrucción.** Es la misma tesis del producto aplicada a sí mismo: lo que se puede persistir no se vuelve a derivar en cada paso.
+- **La ambigüedad de los dos ficheros se resuelve por presencia del efímero.** Un worktree puede contener el `state.json` versionado heredado y su `worker-state.json`; gana el segundo.
+- **No hace falta invocar al binario `git` para decidir el rol.** La detección opcional de worktree puede implementarse leyendo metadatos de Git, pero el funcionamiento base sólo depende del workspace.
+- **La declaración persiste como estado, no como instrucción.** Es la tesis del producto aplicada a sí mismo: lo que puede persistirse no se vuelve a derivar en cada paso.
+- **`deinit` en un worker es local al worker.** Retira el estado efímero sin tocar la instalación compartida del proyecto principal ([ADR 0012](./0012-init-completa-la-instalacion.md)).
+
+## Considered Options
+
+- **Variable de entorno por orquestador** — descartada: acopla la corrección a cada consumidor.
+- **`--worker` en todas las operaciones** — descartado: transforma una propiedad persistente en una obligación repetitiva del modelo.
+- **Autodetección exclusiva por Git** — descartada: no cubre todos los mecanismos de aislamiento y puede confundir submódulos.

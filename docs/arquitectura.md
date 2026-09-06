@@ -5,47 +5,48 @@ Qué es el sistema, cómo funciona y qué garantiza. Las decisiones individuales
 | | |
 |---|---|
 | **Base** | arXiv:2608.26263v3 (Badhe, Tiwari, Chung) |
-| **Estado** | Diseño cerrado, sin implementar |
-| **Decisiones** | 18 ADR en [`docs/adr/`](./adr/) |
-| **Verificación** | Comportamiento de Claude Code contrastado contra la documentación oficial el 2026-09-05; ver [Estado de verificación](#estado-de-verificación) |
+| **Estado** | Diseño v1 cerrado, sin implementar |
+| **Decisiones** | 20 ADR en [`docs/adr/`](./adr/) |
+| **Verificación** | Comportamiento relevante de Claude Code y Git contrastado contra documentación oficial el 2026-09-06 |
 
 ---
 
 ## Qué es
 
-`skstate` mantiene el **estado de ejecución** de un agente de código como un dato estructurado y validado en lugar de como historial conversacional acumulado. El agente deja de reescribir el estado a mano y pasa a proponer parches que un runtime determinista valida y aplica.
+`skstate` mantiene el **estado de ejecución** de un agente de código como un dato estructurado y validado en lugar de depender de historial conversacional acumulado. El agente deja de reescribir el estado a mano y pasa a proponer parches que un runtime determinista normaliza, fusiona, canonicaliza, valida y escribe.
 
-Se distribuye como un binario compilado sin dependencias de runtime, acompañado de una skill que enseña al agente a usarlo ([ADR 0001](./adr/0001-cli-como-binario-compilado.md), [ADR 0009](./adr/0009-interfaz-y-garantia-portable.md)).
+Se distribuye como un binario compilado sin dependencias de runtime, acompañado de una skill que enseña al agente a usarlo ([ADR 0001](./adr/0001-cli-como-binario-compilado.md), [ADR 0009](./adr/0009-interfaz-y-garantia-portable.md)). OpenSkillState es agnóstico del cliente y del orquestador: una CLI, un MCP, un IDE o un runtime externo pueden consumir el mismo estado sin que el núcleo conozca al consumidor.
 
 ---
 
 ## Los dos planos
 
-El patrón del paper no es un mecanismo sino dos, con costes y grados de dificultad muy distintos. Separarlos es lo que hace viable implementarlo.
+El patrón del paper combina dos mecanismos con costes y grados de control distintos:
 
 ```text
 Σt+1 = Σt ⊕ ΔΣt
 ```
 
-| Plano | Qué compra | Evidencia en el paper | Qué se implementa |
-|---|---|---|---|
-| **Estado**<br>esquema, validación determinista, operador de fusión | Precisión y robustez | 0,53 → 0,98 ante ruido<br>0 pasos de recuperación | **Completo y portable** |
-| **Contexto**<br>reconstrucción del prompt por paso, descarte de `Rt` | Coste de tokens | 16,2× menos tokens<br>O(T) frente a O(T²) | **Depende del cliente** |
+| Plano | Qué compra | Qué implementa OpenSkillState |
+|---|---|---|
+| **Estado** | precisión, reanudabilidad y rechazo de estado mal formado | esquema, validación, Merge Patch, canonicalización, persistencia, promoción |
+| **Contexto** | evitar que cada paso cargue toda la trayectoria anterior | OpenSkillState aporta Σ; el runtime decide qué más entra en el prompt |
 
-Lo que cambia entre un runtime y otro no es el contenido de un paso, sino qué arista alimenta el siguiente:
+El contraste conceptual es:
 
 ```text
-Runtime conversacional                 OpenSkillState
+Runtime conversacional                  Ejecución basada en estado
 
 paso 1  [ P + O₁ ]                       paso 1  [ P + Σ₁ + O₁ ]
 paso 2  [ P + O₁R₁a₁ + O₂ ]              paso 2  [ P + Σ₂ + O₂ ]
 paso 3  [ P + O₁R₁a₁ + O₂R₂a₂ + O₃ ]     paso 3  [ P + Σ₃ + O₃ ]
 
-        ^ crece con el historial                 ^ tamaño acotado
-          O(T²) acumulado                          O(T) acumulado
+        ^ arrastra trayectoria                    ^ no necesita trayectoria previa
 ```
 
-El plano de estado se implementa entero y funciona igual en cualquier cliente. El de contexto no se puede forzar desde un repositorio: una sesión interactiva acumula transcripción y nadie puede impedirlo desde fuera. Donde sí se cumple de verdad es **bajo orquestación**, porque un worker lanzado con `claude -p` arranca en frío y Σ es literalmente todo lo que recibe.
+El plano de estado se implementa completo y es portable. El de contexto **no puede imponerse desde el repositorio**: una sesión interactiva puede mantener su transcripción y un cliente puede cargar memoria, instrucciones u otras fuentes propias.
+
+Una ejecución fresca lanzada por un runtime externo sí puede eliminar la **dependencia de la transcripción anterior**, pero eso no significa que Σ sea literalmente lo único en el prompt. Por ejemplo, Claude Code carga Auto Memory al iniciar conversaciones y la comparte entre worktrees del mismo repositorio. OpenSkillState no la desactiva por defecto: es contexto externo al producto, potencialmente complementario o redundante con Σ ([ADR 0009](./adr/0009-interfaz-y-garantia-portable.md)).
 
 ---
 
@@ -53,9 +54,9 @@ El plano de estado se implementa entero y funciona igual en cualquier cliente. E
 
 ### El CLI posee el esquema
 
-El paper es explícito sobre dónde vive la autoridad: *«schema ownership and validation reside in the deterministic runtime rather than the model, malformed outputs cannot corrupt persistent state»*. El modelo emite `ΔΣ`; el CLI valida, fusiona y escribe de forma atómica.
+El runtime es la autoridad sobre la forma persistida. El modelo emite `ΔΣ`; el CLI lo procesa y escribe de forma atómica.
 
-El parche se acepta por **stdin**, lo que evita que el modelo tenga que escapar un JSON anidado dentro de una cadena de shell:
+El parche entra por **stdin**:
 
 ```bash
 skstate patch --stdin <<'EOF'
@@ -63,94 +64,208 @@ skstate patch --stdin <<'EOF'
 EOF
 ```
 
-### El operador de fusión
+El CLI no acepta el contrato `{"state_patch", "action"}` del apéndice A.4 del paper como input propio. `action` pertenece al harness del modelo si ese harness la necesita; OpenSkillState sólo recibe el parche ([ADR 0004](./adr/0004-el-cli-acepta-solo-el-parche.md)).
 
-`⊕` es **RFC 7386 (JSON Merge Patch) sin extensiones**: fusión recursiva de objetos y borrado por `null`. El estándar reemplaza los arrays enteros, lo que encarecería cada parche en los campos que más crecen, así que **las colecciones se modelan como objetos con clave** ([ADR 0002](./adr/0002-listas-como-objetos-con-clave-semantica.md)):
+### RFC 7386 y colecciones con clave
+
+`⊕` es **RFC 7386 JSON Merge Patch sin extensiones**. Como el estándar reemplaza arrays enteros, las colecciones se representan como objetos keyed ([ADR 0002](./adr/0002-listas-como-objetos-con-clave-semantica.md)):
 
 ```jsonc
-// Añadir un hecho — el parche completo, sin reenviar nada más
 { "facts": { "watcher-500ms": "El watcher va 500 ms por detrás de las escrituras" } }
-
-// Borrar uno
 { "facts": { "watcher-500ms": null } }
 ```
 
-Las claves son **slugs semánticos derivados del contenido**, generados por el modelo con una convención mecánica que el CLI valida (`^[a-z0-9]+(-[a-z0-9]+){0,3}$`). Eso hace la escritura idempotente — reescribir un hecho conocido sobrescribe su clave en vez de duplicarlo — y evita que dos escritores concurrentes colisionen salvo cuando escriben sobre lo mismo.
+Las claves son slugs derivados del contenido, **1 a 4 palabras**, kebab-case, `^[a-z0-9]+(-[a-z0-9]+){0,3}$`. Una palabra es válida cuando ya expresa el concepto (`readme`, `arquitectura`).
 
-El CLI **no acepta** el contrato de dos claves del apéndice A.4 del paper. `{"state_patch", "action"}` es un contrato de salida del *modelo*, no de entrada del CLI: en cualquier arquitectura donde el modelo tenga sus propias herramientas, `action` duplica `next_action` y puede desincronizarse sin que nada lo detecte ([ADR 0004](./adr/0004-el-cli-acepta-solo-el-parche.md)).
+El CLI normaliza tipografía mecánica — minúsculas, `_` a `-`, acentos y guiones — y rechaza sólo lo que exige juicio, como superar cuatro palabras. Si dos claves de un mismo parche canonicalizan al mismo slug, rechaza el parche entero.
 
-### El esquema
+### Canonicalización después del merge
 
-Tres niveles, en lugar de un recorte ([ADR 0003](./adr/0003-esquema-por-niveles-y-serializacion-dinamica.md)):
+RFC 7386 interpreta `null` como eliminación de propiedad. Sin una segunda fase, un parche correcto como `{"next_action": null}` eliminaría físicamente parte del esqueleto core.
 
-| Nivel | Campos | Serialización |
+La tubería de `patch` queda fijada por [ADR 0003](./adr/0003-esquema-por-niveles-y-serializacion-dinamica.md):
+
+```text
+normalizar slugs
+→ detectar colisiones
+→ RFC 7386
+→ canonicalizar documento
+→ recalcular derivados
+→ validar esquema
+→ escritura atómica
+```
+
+La canonicalización restaura la representación vacía de campos core no requeridos:
+
+```text
+objective, next_action     → null
+facts, decisions           → {}
+files                      → {relevant:{}, modified:{}}
+verification               → {checks:{}, overall:"not_run"}
+```
+
+`status`, `mode`, `schema_version` y `project_id` son requeridos: intentar eliminarlos falla; el runtime no inventa un estado operativo por defecto.
+
+### El esquema y sus niveles
+
+| Nivel | Campos | `get` |
 |---|---|---|
-| **Núcleo** | `status`, `mode`, `objective`, `next_action`, `facts`, `decisions`, `files`, `verification` | Siempre, aunque estén vacíos |
-| **Extendido** | `hypotheses`, `blockers`, `constraints` | Sólo con contenido |
-| **Meta** | `schema_version`, `project` | Se almacenan pero `get` no los emite |
+| **Core** | `status`, `mode`, `objective`, `next_action`, `facts`, `decisions`, `files`, `verification` | **Siempre**, incluso vacíos |
+| **Extended** | `hypotheses`, `blockers`, `constraints` | Sólo con contenido |
+| **Meta** | `schema_version`, `project_id`, `project` | Nunca |
 
-`skstate get` **es una función de renderizado, no un `cat`**: omite lo vacío (`null`, `[]`, `{}`, `""`; nunca `0` ni `false`) y emite **JSON compacto en una sola línea**. Un campo raro cuesta cero tokens cuando no se usa, y sobre todo deja de **invitar al modelo a rellenarlo**, que es el coste caro y el que ninguna telemetría capta.
+`skstate get` es una **vista**, no un `cat`: emite JSON compacto en una línea siguiendo `x-tier`. `--raw` devuelve el documento persistido y `--pretty` una vista indentada.
 
-El formato se midió antes de elegirlo: sobre el estado real de este repositorio, JSON compacto ahorra un 8,4 % frente a JSON indentado — lo mismo que YAML, pero sin que el modelo tenga que leer una sintaxis y escribir otra. La medición dejó además claro que **el 71 % de Σ son las frases y sólo el 29 % la sintaxis**, así que la palanca sobre su tamaño es escribir entradas concisas, no el formato. El **fichero en disco se queda indentado**, porque está versionado y el diff de un JSON de una línea es inservible; `--pretty` lo indenta por pantalla y `--raw` devuelve el fichero.
+El formato se midió antes de elegirlo: JSON compacto ahorra aproximadamente lo mismo que YAML en el estado de referencia, pero mantiene una sola sintaxis entre lectura y escritura. La mayor parte de Σ es contenido humano, no puntuación JSON; el mecanismo importante es evitar contenido innecesario, no pelear por unos pocos separadores.
 
-`status` es `idle` | `active` | `blocked` | `completed`. `mode` es `execution` | `exploration`, y son ortogonales: `active`+`exploration` es depurar en mitad de una tarea ([ADR 0007](./adr/0007-modo-de-operacion-dentro-del-estado.md)).
+El esquema no se instala en el repositorio. El binario embebe todas las versiones que conoce y aplica la indicada por `schema_version` ([ADR 0015](./adr/0015-el-esquema-vive-dentro-del-binario.md)). `skstate schema` permite auditarlo o alimentar otra interfaz, por ejemplo MCP.
 
-El esquema **no se instala en el repositorio**: el binario embebe todas las versiones que conoce y aplica a cada proyecto la que indica su `schema_version` ([ADR 0015](./adr/0015-el-esquema-vive-dentro-del-binario.md)). Una copia por proyecto volvería nominal la propiedad del esquema —bastaría relajarla ahí para que el binario aceptase en ese repositorio lo que rechaza en los demás— y abriría un segundo frente de deriva junto al estado. `skstate schema` lo imprime para auditarlo o para alimentar un servidor MCP.
+### Identidad estable
+
+`project` deja de ser identidad. `init` genera una vez un `project_id` UUID v4 y lo hace inmutable ([ADR 0019](./adr/0019-identidad-estable-del-proyecto.md)):
+
+```json
+{
+  "project_id": "550e8400-e29b-41d4-a716-446655440000",
+  "project": "open-skillstate"
+}
+```
+
+`project` es un nombre mutable. El histórico se relaciona por `project_id`, por lo que mover o renombrar el repositorio no parte la serie y dos proyectos homónimos no colisionan.
+
+Como el ID debe ser único, `init` **construye** el estado inicial; ya no copia un `state.json` estático desde `skills/`.
+
+### Verificación derivada
+
+`verification.checks` pertenece al agente y es promovible. `verification.overall` pertenece al runtime y se deriva de los checks ([ADR 0006](./adr/0006-merge-promueve-un-subconjunto-y-falla-ruidoso.md)):
+
+```text
+sin checks / todos not_run → not_run
+algún failed               → failed
+todos passed               → passed
+passed + not_run           → partial
+```
+
+Un parche que intente escribir `verification.overall` se rechaza. Así no existen dos fuentes de verdad para el agregado.
 
 ---
 
-## Garantías, por nivel
+## Garantías por nivel
 
-La propiedad que el paper pide — *«malformed outputs cannot corrupt persistent state»* — no se puede cumplir igual en todos los clientes, y conviene decirlo sin adornos.
+La propiedad de «el runtime valida lo que persiste» no se puede imponer igual en todos los clientes:
 
 | Nivel | Mecanismo | Dónde |
 |---|---|---|
-| **Prevención** | `deny: ["Edit(./.openskillstate/...)"]` impide que el modelo escriba el fichero a mano | Sólo Claude Code |
-| **Detección** | El CLI guarda fuera del fichero un hash de lo último que escribió; ante un desajuste valida el estado y rechaza sólo si está mal formado | **En todas partes** |
-| **Validación previa** | JSON Schema del *tool input* validado por el cliente | Donde haya servidor MCP |
+| **Prevención** | regla de permisos que bloquea la edición directa | Donde el cliente lo soporte; Claude Code en v1 |
+| **Detección/validación** | hash externo + validación cuando cambia fuera del CLI | Portable |
+| **Validación previa** | JSON Schema del input de herramienta | Donde exista MCP u otra tool tipada |
 
-La prevención se apoya en una asimetría que la documentación de permisos afirma literalmente: las reglas `deny` alcanzan las herramientas integradas, los comandos bash reconocidos y los destinos de redirecciones, pero **no los subprocesos arbitrarios** — que es exactamente lo que el CLI es.
+En Claude Code `init` instala:
 
-La detección **detecta corrupción, no atajos**, y conviene decirlo así ([ADR 0009](./adr/0009-interfaz-y-garantia-portable.md)). El Σ del orquestador está versionado, de modo que `git pull`, `git checkout` o un rebase reescriben el fichero legítimamente sin pasar por el CLI: si cada desajuste fuese una alarma, la alarma sonaría a diario por motivos correctos y se aprendería a ignorarla. Por eso la respuesta se gradúa por validez — si el estado valida contra el esquema se avisa y se restablece la línea base; si no valida, se rechaza.
-
-El modelo de amenaza sigue siendo **un atajo, no un adversario**, y el atajo típico deja el fichero mal formado justamente porque nadie lo validó al escribirlo. Pero un modelo que edite a mano y lo deje bien formado pasa desapercibido: la prevención real vive sólo en la regla `deny`. Esta capa cubre además un agujero que abre la propia skill, porque un script empaquetado en `scripts/` es un subproceso arbitrario que `deny` no alcanza.
-
-```text
-                ┌── Edit · sed · > fichero ──✗  bloqueado (sólo Claude Code)
-   Modelo ──ΔΣ──┤
-                └── skstate patch ──→ valida esquema
-                                         ⊕ RFC 7386 ──→ estado + hash de integridad
+```json
+{
+  "permissions": {
+    "deny": ["Edit(/.openskillstate/**)"]
+  }
+}
 ```
 
-### El hook `Stop` empuja, no bloquea
+La documentación actual indica que los permisos por path se consultan mediante `Edit(path)` y `Read(path)`, no `Write(path)`. La `/` inicial ancla la regla al *primary working directory* de los project settings, por lo que también funciona correctamente dentro de un worktree.
 
-Rechaza cerrar el turno si `status` sigue en `active` sin un `next_action` concreto. Pero el bloqueo está topado en ocho veces y existe `stop_hook_active` para detectar la reentrada, así que **empuja una vez y cede** ([ADR 0013](./adr/0013-el-hook-stop-empuja-una-vez-y-cede.md)). En `mode: exploration` no comprueba nada. La reanudabilidad es una propiedad *fomentada*, no garantizada.
+La prevención no es una frontera contra procesos arbitrarios. El threat model sigue siendo un agente tomando un atajo, no un adversario. Si `state.json` cambia fuera del CLI, la siguiente operación compara el hash:
 
-### El hook `SessionStart`
+- si el documento sigue validando, avisa y restablece la línea base;
+- si no valida, se niega a continuar sobre él.
 
-Inyecta el procedimiento y la salida de `skstate get` **por stdout con código 0**, que es la vía documentada. Convierte la reanudación en sesión nueva de instrucción a mecanismo: la sesión empieza literalmente siendo (P, Σ).
+Eso **detecta corrupción, no procedencia**. Un cambio manual bien formado no puede distinguirse de un `git checkout` legítimo sin acoplar el producto a una historia de Git que tampoco sería concluyente ([ADR 0009](./adr/0009-interfaz-y-garantia-portable.md)).
+
+### Hooks de Claude Code
+
+`SessionStart` inyecta las instrucciones de continuidad y `skstate get` por stdout con código 0.
+
+`Stop` comprueba que un estado `active` en modo `execution` deje un `next_action` concreto. Bloquea sólo el primer intento y cede si `stop_hook_active` indica reentrada ([ADR 0013](./adr/0013-el-hook-stop-empuja-una-vez-y-cede.md)). La reanudabilidad se **fomenta**, no se promete como barrera absoluta.
 
 ---
 
-## Bajo orquestación
+## Ejecución aislada y orquestación
 
-Un orquestador como [Syntony](https://github.com/vicnroll/syntony) despacha varios workers en paralelo, aislados en worktrees de Git. Ahí el plano de contexto se cumple de verdad, y aparecen problemas que el uso interactivo no tiene.
+OpenSkillState no conoce Syntony, Orca ni ningún orquestador. El patrón portable es simplemente:
 
 ```text
-   Orquestador ── Σ consolidado (versionado en Git)
+   Σ consolidado ── .openskillstate/state.json
         │
-        ├── worktree A ── Σ efímero (ignorado)  ──┐
-        ├── worktree B ── Σ efímero (ignorado)  ──┤── skstate merge ──> promoción
-        └── worktree C ── Σ efímero (ignorado)  ──┘
+        ├── entorno A ── worker-state.json ──┐
+        ├── entorno B ── worker-state.json ──┤── skstate merge ──> promoción
+        └── entorno C ── worker-state.json ──┘
 ```
 
-**Jerarquía** ([ADR 0005](./adr/0005-estado-jerarquico-bajo-orquestacion.md)) — cada worker escribe sólo su Σ; el orquestador sólo el suyo. Nadie comparte fichero, así que no hay contención.
+El aislamiento puede ser un worktree, contenedor, copia del repositorio u otro mecanismo. Cada worker se declara una sola vez con `skstate init --worker` y hereda el `project_id` del proyecto ([ADR 0016](./adr/0016-el-rol-de-worker-se-declara-al-crearlo.md)).
 
-**`merge` promueve, no une** ([ADR 0006](./adr/0006-merge-promueve-un-subconjunto-y-falla-ruidoso.md)) — el Σ de un worker mezcla lo que muere con la tarea (`objective`, `next_action`, `status`) y lo que la sobrevive (`facts`, `decisions`, `files.modified`, `verification`). Sólo se promueve lo segundo, declarado por campo en el esquema. Ante clave idéntica con valor distinto, **falla y lista los conflictos**; el Integrator resuelve emitiendo un parche explícito, de modo que el juicio lo pone el modelo y la escritura sigue siendo determinista.
+### `merge` promueve, no une
 
-**Git no toca el estado de los workers** ([ADR 0008](./adr/0008-politica-de-git-para-el-estado.md)) — si se versionara, Git intentaría fusionar con su algoritmo de tres vías un fichero que `merge` ya sabe fusionar semánticamente, produciendo conflictos donde no los hay y, peor, fusiones limpias que son incorrectas. Los dos Σ necesitan nombres de fichero distintos, porque los worktrees comparten el `.gitignore`.
+Sólo se promocionan los nodos `x-promote`:
 
-**Cerrojo, no *compare-and-swap*** ([ADR 0011](./adr/0011-cerrojo-de-fichero-en-lugar-de-compare-and-swap.md)) — con esta topología el único caso concurrente son varias integraciones simultáneas sobre el Σ del orquestador, y el `patch` del CLI es un lee-modifica-escribe de milisegundos. Con RFC 7386 el parche no depende de lo que se leyó, así que un cerrojo basta y se ahorra el campo, la bandera y el protocolo de reintento que el CAS exigiría al modelo.
+- `facts`
+- `decisions`
+- `constraints`
+- `files.modified`
+- `verification.checks`
+
+`objective`, `next_action`, `status`, `mode`, `blockers`, `hypotheses` y `files.relevant` mueren con la ejecución local. `verification.overall` se recalcula en el destino.
+
+Ante una misma clave con valores distintos, `merge` falla y lista el conflicto. El juicio queda fuera del runtime: una persona o agente decide y escribe el resultado mediante un parche explícito.
+
+### Git transporta estado, no lo fusiona
+
+`worker-state.json` es efímero e ignorado. `state.json` sí se versiona, pero [ADR 0008](./adr/0008-politica-de-git-para-el-estado.md) prohíbe que Git intente fusionarlo textualmente:
+
+```gitattributes
+.openskillstate/state.json -merge
+```
+
+El atributo `merge` unset usa el driver binario integrado: conserva provisionalmente la versión actual y marca conflicto. No necesita un driver externo.
+
+Esto cubre también ramas humanas normales. Durante un merge:
+
+```bash
+git show MERGE_HEAD:.openskillstate/state.json | skstate merge --stdin
+git add .openskillstate/state.json
+```
+
+Git aporta la otra versión; `skstate` decide qué conocimiento puede sobrevivir según el esquema.
+
+### Concurrencia
+
+Con un fichero por ejecución aislada, la concurrencia deja de estar en el camino caliente. El único caso relevante son varias integraciones escribiendo simultáneamente el consolidado. Para el lee-modifica-escribe corto de `patch`/`merge` basta un cerrojo exclusivo de fichero; no se introduce CAS ni `state_version` ([ADR 0011](./adr/0011-cerrojo-de-fichero-en-lugar-de-compare-and-swap.md)).
+
+---
+
+## State budget
+
+Las claves semánticas reducen duplicados, pero **no demuestran que Σ permanezca acotado**. Si el número de hechos útiles creciera linealmente con los pasos, el coste acumulado podría volver a aproximarse a O(T²) aunque la transcripción desapareciese.
+
+Por eso la v1 incorpora el [ADR 0020](./adr/0020-presupuesto-de-estado.md). `skstate check` informa siempre de tamaño de la salida compacta y composición por colecciones:
+
+```text
+state: valid
+state size: 14.2 KiB
+facts: 87
+  8.6 KiB
+decisions: 23
+  2.1 KiB
+constraints: 12
+  1.0 KiB
+```
+
+No existe un máximo global inventado. El usuario o CI puede declarar un presupuesto blando:
+
+```bash
+skstate check --budget-bytes 16384
+```
+
+Superarlo produce una advertencia, no invalida el estado ni dispara poda automática. El runtime mide; el agente decide qué información dejó de ser necesaria.
+
+La arquitectura puede decir que el patrón permite coste O(T) **si `|Σ|` permanece acotado**, pero v1 no vende esa condición como garantía mecánica. La instrumenta desde el primer día para poder justificar más adelante un budget recomendado con evidencia.
 
 ---
 
@@ -158,94 +273,112 @@ Un orquestador como [Syntony](https://github.com/vicnroll/syntony) despacha vari
 
 | Comando | Qué hace |
 |---|---|
-| `get` | Renderiza Σ en JSON compacto omitiendo lo vacío. `--pretty` lo indenta, `--raw` devuelve el fichero |
-| `patch` | Aplica un parche RFC 7386 por stdin, validando contra el esquema |
-| `check` | Valida el estado, detecta desajuste de `schema_version` y escritura directa |
-| `init` | Instala el kit en el repositorio |
-| `merge` | Promueve el Σ de un worker al del orquestador |
-| `migrate` | Migra el estado entre versiones de esquema, con copia de seguridad |
-| `schema` | Imprime el esquema embebido. `--version N` para uno anterior |
+| `get` | Renderiza Σ compacto según tiers. `--pretty` indenta; `--raw` devuelve el documento |
+| `patch` | Aplica RFC 7386, canonicaliza, recalcula derivados, valida y escribe |
+| `check` | Valida, comprueba integridad/versión y diagnostica tamaño. `--budget-bytes N` añade budget blando |
+| `init` | Inicializa proyecto e instala integraciones. `--worker` declara un estado aislado |
+| `uninstall` | Retira skills/hooks/instrucciones, conservando workspace e identidad |
+| `deinit` | Retira el proyecto OpenSkillState y su workspace; el histórico sólo con `--purge-history` explícito |
+| `merge` | Promueve desde un workspace/estado origen; `--stdin` acepta un estado completo |
+| `migrate` | Migra explícitamente entre versiones, con backup |
+| `schema` | Imprime el esquema embebido; `--version N` para uno anterior |
 
-Hay además dos puntos de entrada que no son superficie de usuario. `history` es el del agente analista, oculto de `--help` y descrito en el [ADR 0017](./adr/0017-historico-local-inalcanzable-desde-el-agente.md). Y `hook` no lo escribe nadie: Es por donde el cliente invoca al binario cuando dispara un evento, `skstate hook stop` y `skstate hook session-start`. Apunta al binario y no a un script para no reintroducir la dependencia de runtime que el [ADR 0001](./adr/0001-cli-como-binario-compilado.md) rechazó, ni un segundo sitio donde viva conocimiento del esquema ([ADR 0012](./adr/0012-init-completa-la-instalacion.md)).
+`history` y `hook` son superficies especiales. `history` no aparece en el help ni en la skill de trabajo; `hook` es invocado por el cliente (`skstate hook stop`, `skstate hook session-start`).
 
-`init` **completa la instalación**: el workspace, la skill en `.claude/skills/` y `.agents/skills/`, la entrada de `.gitignore`, la regla `deny` y los hooks en `.claude/settings.json`, y la sección en `CLAUDE.md`/`AGENTS.md` dentro de un bloque delimitado e idempotente ([ADR 0012](./adr/0012-init-completa-la-instalacion.md)). La configuración de permisos se **fusiona** con la que el usuario ya tenga, y como JSON no admite el bloque delimitado que resuelve el Markdown, `init` anota en `.openskillstate/installed.json` qué insertó — así reejecutarlo sustituye en vez de duplicar, y desinstalar no tiene que adivinar. Con TTY pregunta; sin TTY exige `--write-instructions` o `--no-write-instructions` y falla si no recibe ninguna, porque un `init` headless que decide en silencio es peor que uno que se detiene diciendo qué falta.
+### `init`, `uninstall` y `deinit`
 
-`migrate` es siempre explícito ([ADR 0014](./adr/0014-migracion-explicita-de-schema-version.md)). Un `schema_version` más nuevo que el binario se rechaza siempre; uno **más antiguo opera con normalidad**, avisando, porque el binario lleva ese esquema embebido y sabe validar contra él — bloquear hasta migrar mataría al worker headless que no tiene ningún humano detrás. La ventana de operación de una versión es acotada; la de migración es indefinida, porque `migrate` necesita el esquema de origen y retirarlo dejaría proyectos varados sin camino de salida. Las migraciones se componen de saltos consecutivos, de modo que cada versión nueva cuesta uno.
+[ADR 0012](./adr/0012-init-completa-la-instalacion.md) separa integración de datos.
+
+`init` crea el estado con UUID propio, instala skills, entradas de `.gitignore` y `.gitattributes`, regla/hooks de Claude y bloque de instrucciones. Cada modificación compartida se registra en `.openskillstate/installed.json`.
+
+`uninstall` quita las integraciones de cliente, pero **conserva** `state.json`, `project_id` y la protección Git del estado. Permite cambiar de cliente o reinstalar más tarde sin perder continuidad.
+
+`deinit` es destructivo: retira integración, política Git y workspace. En headless exige `--yes`. No borra el histórico local salvo `--purge-history`; un `init` posterior generará otro `project_id`.
 
 ---
 
-## Instrumentación
+## Migraciones
 
-Se mide **el estado, no los tokens** ([ADR 0010](./adr/0010-se-instrumenta-el-estado-no-los-tokens.md)): tamaño de Σ en el tiempo, qué campos se usan de verdad, cuántos casi-duplicados aparecen, con qué frecuencia falla `merge`. El criterio es cuál de las dos mediciones puede **cambiar una decisión ya tomada**: el ahorro de tokens del paper no está en duda y reproducirlo no alteraría nada, mientras que la promoción por campo del ADR 0006 no distingue hechos durables de hechos locales y nadie sabe todavía si eso resulta ruidoso.
+Las migraciones son explícitas ([ADR 0014](./adr/0014-migracion-explicita-de-schema-version.md)):
 
-Todo eso, y además los pasos, decisiones y acciones, se guardan en un **almacén local en SQLite fuera del repositorio** ([ADR 0017](./adr/0017-historico-local-inalcanzable-desde-el-agente.md)). Fuera del repositorio porque las preguntas que justifican medir se contestan **cruzando proyectos**, y un registro por repositorio no las responde. El proyecto se identifica por el campo `project`, no por su ruta, así que mudar el repositorio no parte la serie.
+- un estado más nuevo que el binario se rechaza;
+- uno más antiguo puede seguir operando mientras esa versión esté en la ventana de operación;
+- `migrate` cambia la versión y deja backup;
+- los saltos se implementan consecutivamente (`1→2`, `2→3`...), no como convertidores N→latest;
+- la ventana de migración es indefinida aunque la de operación pueda cerrarse.
+
+`project_id` se conserva a través de toda migración.
+
+---
+
+## Instrumentación e histórico
+
+[ADR 0010](./adr/0010-se-instrumenta-el-estado-no-los-tokens.md) mide aquello que OpenSkillState puede observar portably: tamaño, uso de campos, casi duplicados y conflictos. No depende de telemetría de tokens de un cliente concreto.
+
+El histórico vive en SQLite fuera del repositorio ([ADR 0017](./adr/0017-historico-local-inalcanzable-desde-el-agente.md)):
 
 ```text
-   skstate     ──escribe──▶  histórico local  ◀──lee──  skstate history
-   (el agente lo usa)         (SQLite, WAL)             (oculto; agente analista)
+   skstate ──escribe──▶ SQLite local ◀──lee── skstate history
 ```
 
-**El agente que trabaja no puede alcanzarlo.** Ningún comando de `skstate` devuelve datos del histórico — ni resumidos, ni como contexto — y ni el skill ni `--help` lo mencionan. Guardar cronología no contradice el patrón porque el O(T²) es un problema de *contexto*, no de *almacenamiento*: lo que hace daño es que la cronología **entre en el prompt**. La skill del agente analista se instala aparte y en otro ámbito, nunca en el repositorio del proyecto, porque una skill vecina que ofrezca «todo lo registrado» se invocaría sola justo cuando el agente creyera necesitar contexto previo.
+El flujo normal del agente de trabajo **no lo recibe ni lo inyecta**. Eso es una política de no exposición, no una frontera de seguridad: un agente con shell podría descubrir un subcomando oculto, pero la skill, hooks, help y herramientas normales no lo publican.
 
-El precio, dicho sin adornos: el almacén contiene **contenido del proyecto**, no sólo recuentos, y sobrevive a borrar el repositorio. Por eso `history purge` es parte del diseño y no un extra, y por eso exportar métricas y exportar contenido tendrán que ser caminos distintos cuando llegue OTLP.
+Cada evento se relaciona por `project_id`, no por path ni nombre. El almacén puede contener contenido del proyecto y sobrevivir a borrar el repo, por lo que `history purge` y una separación futura entre exportar métricas y exportar contenido forman parte del diseño.
 
 ---
 
 ## Límites
 
-**No hay disciplina de estado universalmente buena.** La sección 7 del paper reconoce tres escenarios donde su premisa falla: sin esquema fijo conocido de antemano, cuando la relevancia de una observación anterior no se reconoció en su momento, y cuando el objetivo se define sobre la trayectoria misma. Depurar, auditar y explorar caen ahí, y forzar la disciplina **empeora** el resultado. Para eso existe `mode: exploration`.
+**La disciplina de estado no es universalmente buena.** Depuración, auditoría o exploración pueden necesitar observaciones cuya relevancia sólo aparece más tarde. `mode: exploration` relaja la presión por dejar un `next_action` y estructurar prematuramente.
 
-**La compactación no es una implementación del plano de contexto.** Un resumen con pérdida reintroduce exactamente el envenenamiento que el patrón ataca. Es lo que ocurre cuando el plano de contexto falla, no una forma de conseguirlo.
+**La compactación no implementa el plano de contexto.** Resumir con pérdida para alcanzar un tamaño reintroduce riesgo de borrar precisamente lo relevante.
 
-**El plano de contexto no se puede forzar en una sesión interactiva.** Ninguna skill ni hook puede obligar a un cliente a descartar su transcripción. Bajo orquestación sí se cumple, porque cada worker arranca en frío — y ahí la pérdida de relevancia retroactiva pasa a ser un riesgo real, no teórico.
+**OpenSkillState no monopoliza el contexto del cliente.** Puede sustituir la dependencia de la transcripción previa por Σ en ejecuciones frescas, pero memoria automática, instrucciones o contexto propio del cliente pueden coexistir.
+
+**Σ no está matemáticamente acotado por el esquema.** V1 evita varias formas de crecimiento accidental y expone un state budget, pero el contenido útil todavía puede crecer. Esa condición se mide, no se oculta detrás de la palabra «bounded».
 
 ---
 
 ## Estado de verificación
 
-Las afirmaciones sobre el comportamiento de Claude Code sostienen decisiones de ingeniería, así que se contrastaron una a una contra la documentación oficial el 2026-09-05.
+Las afirmaciones que sostienen decisiones específicas de Claude Code se contrastaron contra documentación oficial; las de Git contra `gitattributes`.
 
 | # | Afirmación | Veredicto | Consecuencia |
 |---|---|---|---|
-| 1 | `deny` alcanza herramientas integradas, comandos bash reconocidos y redirecciones, pero no subprocesos arbitrarios | **Confirmada, literal** | La prevención se sostiene sobre texto citable |
-| 2 | Orden de evaluación `deny` → `ask` → `allow`, primera coincidencia decide | **Confirmada** | Un `allow` posterior no puede ablandar el `deny` |
-| 3 | `deny` tiene precedencia sobre los **hooks** y aplica sin *workspace trust* | **No documentada** | Retirada como argumento; nada depende de ella |
-| 4 | `SessionStart` inyecta contexto | **Confirmada vía stdout**; `additionalContext` por evento, no documentado | Se implementa con stdout y salida 0 |
-| 5 | `Stop` puede bloquear con salida 2 | **Matizada**: tope de 8 bloqueos y campo `stop_hook_active` | Empuja una vez y cede |
-| 6 | `PostToolUse` no puede deshacer la acción | **Confirmada, literal** | La receta de Codex CLI no se traslada |
-| 7 | `PreCompact` es informativo y no bloquea | **No documentada** | Suposición, no hecho; no se construye nada sobre ella |
-| 8 | Subagentes aislados, sin historial, sólo devuelven su resumen | **Confirmada**, con excepción: un `fork` **sí** hereda el historial | Un orquestador no debe despachar forks |
-| 9 | Cada subagente recarga CLAUDE.md y los skills precargados | **Confirmada** (salvo `Explore`/`Plan`); coste **no cuantificado** | Hay coste fijo por invocación, sin cifra publicada |
-| 10 | `claude_code.token.usage` con `type`, `session.id` y `agent.name` | **Confirmada**, con límite: los subagentes propios colapsan a `"custom"` | Separa orquestador de subagentes, no unos de otros |
-
-Cinco confirmadas (dos literales), tres matizadas con consecuencia directa sobre el diseño, dos no documentadas retiradas como argumento. Ninguna resultó falsa.
+| 1 | Los permisos de path para escritura se consultan mediante `Edit(path)`, no `Write(path)` | **Confirmada, literal** | La regla instalada usa sólo `Edit` |
+| 2 | `/path` en project settings se ancla al primary working directory | **Confirmada** | `Edit(/.openskillstate/**)` protege el workspace correcto también en worktrees |
+| 3 | Bash y redirecciones reconocidas se someten a permisos; procesos arbitrarios no ofrecen la misma garantía | **Confirmada con límites documentados** | La prevención sigue siendo adicional, no universal |
+| 4 | `SessionStart` puede inyectar contexto vía stdout | **Confirmada** | El hook usa stdout y código 0 |
+| 5 | `Stop` tiene reentrada y límite de bloqueos | **Confirmada** | Empuja una vez y cede |
+| 6 | `PostToolUse` no deshace acciones ya ejecutadas | **Confirmada** | No se usa como barrera de persistencia |
+| 7 | Los subagentes normales tienen contexto aislado; un `fork` hereda el padre | **Confirmada** | Un consumidor que busque frescura debe evitar forks |
+| 8 | Auto Memory se carga al inicio y se comparte entre worktrees del mismo repo | **Confirmada** | No afirmar que Σ es literalmente todo el contexto; `init` no la desactiva |
+| 9 | `merge` unset en `.gitattributes` conserva nuestra versión y marca conflicto | **Confirmada, literal** | `state.json -merge` evita fusiones textuales silenciosas sin driver externo |
 
 ---
 
 ## Fuentes
 
-Consultadas y verificadas el 2026-09-05. Las de Claude Code se citan separando **referencia** de **guía**: buena parte de los detalles operativos sólo aparecen en la guía, y consultar la página equivocada produce falsos «no documentado».
+Consultadas o revalidadas el 2026-09-06.
 
-1. **SKILL.state: Scalable Long-Horizon Agent Skills** — Badhe, Tiwari, Chung. Formalismo `⊕`, contrato de dos claves del apéndice A.4, esquema de cinco campos, limitaciones de la sección 7.
+1. **SKILL.state: Scalable Long-Horizon Agent Skills** — Badhe, Tiwari, Chung.
    <https://arxiv.org/html/2608.26263v3>
 
-2. **Claude Code — Hooks (referencia)** — Eventos, formato de salida JSON, códigos de salida.
+2. **Claude Code — Hooks**.
    <https://code.claude.com/docs/en/hooks>
-
-   **Hooks (guía)** — Inyección de contexto en `SessionStart` vía stdout, `stop_hook_active` y el tope de ocho bloqueos, imposibilidad de deshacer en `PostToolUse`.
    <https://code.claude.com/docs/en/hooks-guide>
 
-3. **Claude Code — Subagents** — Aislamiento de contexto, qué recibe el subagente (CLAUDE.md salvo `Explore`/`Plan`), la excepción del tipo `fork`, el campo `skills:`.
-   <https://code.claude.com/docs/en/sub-agents>
-
-4. **Claude Code — Configure permissions** — Sintaxis `Edit(ruta)`, alcance sobre bash y redirecciones, exclusión de subprocesos arbitrarios, orden de evaluación.
+3. **Claude Code — Permissions** — reglas `Edit(path)`, anclaje de `/path`, Bash y redirecciones.
    <https://code.claude.com/docs/en/permissions>
 
-5. **Claude Code — Monitoring usage** — `claude_code.token.usage`, atributo `type`, `session.id`, `agent.name` con los subagentes propios colapsados a `"custom"`.
-   <https://code.claude.com/docs/en/monitoring-usage>
+4. **Claude Code — Memory** — Auto Memory, carga inicial y compartición entre worktrees.
+   <https://code.claude.com/docs/en/memory>
 
-6. **RFC 7386 — JSON Merge Patch** — Borrado por null, fusión recursiva, reemplazo completo de arrays, algoritmo de referencia.
+5. **Claude Code — Subagents**.
+   <https://code.claude.com/docs/en/sub-agents>
+
+6. **RFC 7386 — JSON Merge Patch**.
    <https://datatracker.ietf.org/doc/html/rfc7386>
 
-7. **SKILL.state: O(T) Agent Memory — Codex CLI** — Daniel Vaughan. Análisis previo del mismo traslado; origen de la receta `PostToolUse` que no aplica en Claude Code.
-   <https://codex.danielvaughan.com/2026/08/29/skstate-ot-agent-memory-structured-execution-state-codex-cli-long-horizon/>
+7. **Git — gitattributes** — semántica del atributo `merge` unset.
+   <https://git-scm.com/docs/gitattributes>

@@ -1,0 +1,3 @@
+# OpenSkillState consolidated state has semantic merge rules of its own.
+# Git must never perform a textual three-way merge on it (ADR 0008).
+.openskillstate/state.json -merge

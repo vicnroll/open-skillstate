@@ -4,26 +4,46 @@ status: accepted
 
 # `skstate merge` promueve un subconjunto declarado y falla de forma ruidosa ante conflicto
 
-La jerarquía de [ADR 0005](./0005-estado-jerarquico-bajo-orquestacion.md) obliga a consolidar los Σ de los workers al integrar sus worktrees. Se decide que esa operación **no es una unión de dos Σ, sino la promoción de un subconjunto declarado en el esquema**, y que cualquier colisión residual detiene la operación en vez de resolverse sola.
+La jerarquía de [ADR 0005](./0005-estado-jerarquico-bajo-orquestacion.md) obliga a consolidar los Σ de los workers al integrar sus espacios de trabajo. Se decide que esa operación **no es una unión de dos Σ, sino la promoción de un subconjunto declarado en el esquema**, y que cualquier colisión residual detiene la operación en vez de resolverse sola.
 
 ## Promoción, no unión
 
-El Σ de un worker recién terminado mezcla dos cosas: estado que muere con la tarea (`objective`, `next_action`, `status`) y estado que sobrevive a ella (`facts`, `decisions`, `files.modified`, `verification`). Unirlo todo llenaría el Σ del orquestador con el `objective` y el `next_action` de una docena de workers, y lo haría crecer sin límite justo donde tiene que estar acotado. Sólo se promueven los campos declarados como promovibles en el esquema.
+El Σ de un worker recién terminado mezcla dos cosas: estado que muere con la tarea (`objective`, `next_action`, `status`, `mode`, `blockers`, `hypotheses`, `files.relevant`) y estado que puede sobrevivirla (`facts`, `decisions`, `constraints`, `files.modified`, `verification.checks`). Unirlo todo llenaría el Σ consolidado con objetivos, acciones y detalles locales de una docena de trabajos, y lo haría crecer sin límite justo donde tiene que permanecer pequeño.
 
-**Debilidad asumida**: la granularidad es por campo, así que dentro de `facts` conviven hechos durables sobre el repositorio y hechos locales de la tarea, y la promoción no los distingue. Se acepta a cambio de que la operación sea determinista y de coste cero en tiempo de ejecución. Si resulta ruidoso en la práctica, la salida es marcar la durabilidad por ítem — pero pagar ese coste antes de tener workers reales ejecutándose sería optimizar contra una suposición.
+Sólo se promueven los nodos declarados como promovibles en el esquema mediante `x-promote`. La promoción es **recursiva**: no hace falta declarar promovible un objeto padre si sólo algunos de sus hijos lo son. Por eso `files.modified` se promueve y `files.relevant` no; del mismo modo, `verification.checks` se promueve y `verification.overall` no.
+
+`constraints` **sí se promueve**. Una restricción impuesta desde fuera de la tarea —compatibilidad, un no-go del usuario, una condición de despliegue— sigue limitando decisiones posteriores aunque haya sido descubierta por un worker.
+
+**Debilidad asumida**: la granularidad de `facts`, `decisions` y `constraints` sigue siendo por colección, así que dentro de ellas pueden convivir elementos durables y locales. Se acepta a cambio de que la operación sea determinista y de coste cero en tiempo de ejecución. Si resulta ruidoso en la práctica, la salida es marcar la durabilidad por ítem — pero pagar ese coste antes de tener evidencia sería optimizar contra una suposición.
+
+## `verification.overall` es derivado, no promocionado
+
+`verification.overall` resume los checks que existen **en el estado destino**, no el resultado del último worker integrado. Promocionarlo produciría resultados absurdos: dos workers pueden aportar checks distintos y el `overall` del último no representa al conjunto.
+
+Se decide que `overall` sea un campo **derivado por el runtime** después de `patch`, `merge` y `migrate`:
+
+- sin checks, o si todos están `not_run` → `not_run`
+- si existe algún `failed` → `failed`
+- si todos están `passed` → `passed`
+- cualquier mezcla restante de `passed` y `not_run` → `partial`
+
+El modelo no lo escribe. Un parche que incluya `verification.overall` se rechaza como escritura sobre un campo derivado; el CLI lo calcula. Esto evita dos fuentes de verdad dentro del mismo objeto.
 
 ## Fallar ruidoso
 
-Las claves semánticas de [ADR 0002](./0002-listas-como-objetos-con-clave-semantica.md) ya resuelven la mayoría de los casos sin que nadie decida: dos workers que registran hechos distintos escriben claves distintas y RFC 7386 las une. Queda sólo la colisión de **clave idéntica con valor distinto**, que por construcción significa que ambos escribieron sobre lo mismo y discrepan. `merge` sale con error listando esas claves. Los escalares no se fusionan nunca: pertenecen al Σ que los posee.
+Las claves semánticas de [ADR 0002](./0002-listas-como-objetos-con-clave-semantica.md) ya resuelven la mayoría de los casos sin que nadie decida: dos workers que registran hechos distintos escriben claves distintas y RFC 7386 las une. Queda sólo la colisión de **clave idéntica con valor distinto**, que por construcción significa que ambos escribieron sobre lo mismo y discrepan. `merge` sale con error listando esas claves. Los escalares no promovibles pertenecen al Σ que los posee y no entran en la operación.
 
 ## Consequences
 
-- **El juicio vive fuera del CLI.** Cuando `merge` falla, el Reviewer/Integrator del orquestador — que es un agente — resuelve emitiendo un **parche explícito**. El modelo decide, la escritura sigue siendo determinista y auditable, y el CLI nunca adivina. Es el mismo reparto que en [ADR 0003](./0003-esquema-por-niveles-y-serializacion-dinamica.md): lo mecánico dentro, el criterio encima.
-- **La integración puede detenerse.** Es el precio de no perder datos en silencio, y es coherente con proteger las escrituras concurrentes mediante un cerrojo ([ADR 0011](./0011-cerrojo-de-fichero-en-lugar-de-compare-and-swap.md)): no tendría sentido evitar el *lost update* en el camino de escritura y aceptarlo en el de consolidación.
+- **El juicio vive fuera del CLI.** Cuando `merge` falla, quien integra resuelve emitiendo un **parche explícito**. El modelo o la persona decide; la escritura sigue siendo determinista y auditable, y el CLI nunca adivina.
+- **La integración puede detenerse.** Es el precio de no perder datos en silencio, y es coherente con proteger las escrituras concurrentes mediante un cerrojo ([ADR 0011](./0011-cerrojo-de-fichero-en-lugar-de-compare-and-swap.md)).
+- **La promoción no depende de un orquestador.** `merge` opera sobre estados OpenSkillState y su esquema; el consumidor que creó esos estados es irrelevante.
+- **El agregado de verificación siempre describe el destino.** Integrar un check nuevo puede cambiar `overall` aunque el worker que lo produjo tuviera otro valor local.
 
 ## Considered Options
 
 - **Último gana** — descartado: es *lost update* con otro nombre.
-- **Conservar ambos renombrando** (`…-2`, o namespacing por id de worker, `slug@worker-3`) — descartado: no elimina la colisión, la vuelve indetectable. Llena Σ de casi-duplicados que nada marca como relacionados, rompe la idempotencia entre workers que motivó las claves semánticas, y fija procedencia de una ejecución transitoria dentro de una clave permanente. Además el id de worker no existe en el camino interactivo.
+- **Conservar ambos renombrando** (`…-2`, o namespacing por id de worker) — descartado: no elimina la colisión, la vuelve indetectable. Llena Σ de casi-duplicados, rompe la idempotencia y fija procedencia transitoria dentro de claves permanentes.
 - **Que el Integrator decida qué promover** — descartado como mecanismo base: resuelve la debilidad de granularidad con criterio real, pero deja de ser determinista y el mismo worker podría promover cosas distintas en dos ejecuciones idénticas. Sigue disponible como capa opcional encima.
-- **Promover todo y podar después** — descartado: traslada el problema al orquestador, que necesitaría un criterio de poda que es esta misma pregunta desplazada en el tiempo.
+- **Promover `verification.overall`** — descartado: resume el estado origen, no el conjunto de checks del destino.
+- **Promover todo y podar después** — descartado: traslada el problema al integrador y permite crecimiento innecesario antes de aplicar criterio.

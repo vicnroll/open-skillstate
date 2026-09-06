@@ -39,7 +39,7 @@ skstate patch --stdin <<'EOF'
 EOF
 ```
 
-`status: "blocked"` and a populated `blockers` belong together. Setting one without the other leaves the state contradictory.
+`status: "blocked"` and a populated `blockers` usually belong together. Setting one without the other can leave a confusing state even though the schema permits it.
 
 ## `constraints`
 
@@ -58,6 +58,8 @@ EOF
 
 A constraint differs from a decision in where it came from: a decision is something you chose and could revisit with reason; a constraint is imposed from outside and you do not get to relax it on your own.
 
+Constraints are promotable under orchestration because an externally imposed requirement normally survives the worker that discovered it.
+
 ---
 
 # Core field detail
@@ -74,12 +76,31 @@ Keep `modified` aligned with the actual working tree. If a change gets reverted,
 
 ## `verification`
 
-```jsonc
-{ "verification": {
-    "checks": { "go-test-all": { "name": "go test ./...", "result": "passed", "details": "all packages" } },
-    "overall": "passed" } }
+Write checks only:
+
+```bash
+skstate patch --stdin <<'EOF'
+{
+  "verification": {
+    "checks": {
+      "go-test-all": {
+        "name": "go test ./...",
+        "result": "passed",
+        "details": "all packages"
+      }
+    }
+  }
+}
+EOF
 ```
 
-`result` is `passed`, `failed` or `not_run`. `overall` is `not_run`, `partial`, `passed` or `failed`. Record the outcome, never the raw log.
+A check `result` is `passed`, `failed` or `not_run`.
 
-Setting `status: "completed"` with `verification.overall: "not_run"` is allowed but should be deliberate: it states that the work is done and unverified, which is a real and sometimes correct thing to say.
+`verification.overall` is **runtime-owned and derived**. Do not include it in a patch. The CLI computes it from all checks currently in the state:
+
+- no checks, or all `not_run` → `not_run`
+- any `failed` → `failed`
+- all `passed` → `passed`
+- a remaining mix of `passed` and `not_run` → `partial`
+
+Under merge, `verification.checks` is promotable; `overall` is recalculated in the destination after promotion.

@@ -1,49 +1,64 @@
 {
   "schema_version": 1,
+  "project_id": "0259c8be-02fd-48bd-bc15-c53b831b0356",
+  "project": "open-skillstate",
   "status": "active",
   "mode": "execution",
   "objective": "Diseñar OpenSkillState: llevar el patrón SKILL.state (arXiv:2608.26263v3) a un producto funcional, sustituyendo el prototipo de sólo texto que había en este repositorio",
-  "next_action": "Implementar el CLI skstate en Go: go mod init github.com/vicnroll/open-skillstate, y get, patch y check primero, que son el plano de estado completo y lo único portable",
+  "next_action": "Implementar el CLI skstate en Go: empezar por get, patch y check, incluyendo canonicalización, project_id, verificación derivada y diagnóstico de state budget",
   "facts": {
-    "diseno-cerrado-sin-implementar": "El diseño está cerrado y documentado, pero el binario no existe: no hay ningún .go ni go.mod en el repositorio",
-    "decisiones-en-adr": "Las 18 decisiones de diseño y su porqué viven en docs/adr/0001 a 0018; docs/arquitectura.md describe el conjunto y CONTEXT.md fija el vocabulario. No reargumentar lo que ya está ahí",
+    "diseno-cerrado-sin-implementar": "El diseño v1 está cerrado y documentado, pero el binario no existe: no hay ningún .go ni go.mod en el repositorio",
+    "decisiones-en-adr": "Las 20 decisiones de diseño y su porqué viven en docs/adr/0001 a 0020; docs/arquitectura.md describe el conjunto y CONTEXT.md fija el vocabulario. No reargumentar lo que ya está ahí",
     "prototipo-no-normativo": "El prototipo anterior (sólo texto, basado en la v2 del paper) está superado y fuera del árbol de trabajo: sólo existe como el commit inicial 4d7b571. No restaurarlo ni alinearse con lo que prometían su README ni su procedure.md",
-    "idioma-por-artefacto": "Artefactos distribuibles en inglés (SKILL.md, README.md, schema.json, instructions-fragment.md); artefactos de diseño en español (arquitectura.md, ADR, CONTEXT.md)",
-    "syntony-es-el-runtime": "Syntony (github.com/vicnroll/syntony, privado, Go, pre-alpha) es el orquestador headless que despacha workers vía codex exec, claude -p y opencode serve. Es el caso de uso fuerte del patrón y comparte lenguaje con este CLI",
-    "carga-util-en-skills": "skills/ contiene lo que init instalará: la skill duplicada en .claude/ y .agents/ con sus references, el estado inicial, el fragmento de instrucciones y el de settings. El esquema no es carga útil: vive en schema/ y se embebe en el binario",
+    "idioma-por-artefacto": "Artefactos distribuibles en inglés (SKILL.md, README.md, references e instrucciones); artefactos de diseño en español (arquitectura.md, ADR, CONTEXT.md)",
+    "agnostico-del-orquestador": "OpenSkillState no depende de Syntony ni de ningún orquestador. Worktrees, contenedores o copias son ejemplos de aislamiento; el contrato portable es CLI + filesystem",
+    "carga-util-en-skills": "skills/ contiene las skills y fragmentos que init instalará. El estado inicial ya no se copia desde un template: init lo construye para poder generar un project_id único. El esquema vive en schema/ y se embebe en el binario",
     "identidad-separada": "SKILL.state es el patrón del paper; OpenSkillState el producto; skstate su CLI; .openskillstate/ el workspace. Nunca escribir 'skillstate': es otro producto ya publicado en npm que además usa .skillstate/"
   },
   "decisions": {
-    "esquema-codificado-en-json": "schema/v1.json lleva anotaciones x-tier y x-promote, de modo que qué serializa get y qué promueve merge son datos declarados, no lógica escrita en el binario",
+    "esquema-codificado-en-json": "schema/v1.json lleva anotaciones x-tier, x-promote, x-derived y x-immutable para dirigir get, merge y las invariantes del runtime",
     "estado-propio-sin-binario": "Mientras el CLI no exista, este .openskillstate/state.json se mantiene a mano como notas de diseño. Es la excepción, no el patrón que el producto predica",
     "sin-procedure-md": "procedure.md desaparece del diseño: el CLI valida lo que ese fichero pedía y la guía semántica restante vive en la skill",
-    "historico-fuera-del-alcance": "El histórico se guarda pero el agente que trabaja no puede alcanzarlo. Ningún comando de skstate lo devuelve, ni resumido ni como contexto: eso reintroduciría el O(T²) que el producto elimina"
+    "historico-no-expuesto": "El histórico se guarda fuera del repositorio pero no se publica ni se inyecta al agente de trabajo. No es una frontera de seguridad; skstate history existe para análisis explícito",
+    "project-id-estable": "Cada init genera un UUID v4 project_id inmutable; project es sólo nombre mutable y el histórico se agrupa por project_id",
+    "canonicalizacion-post-merge": "patch aplica RFC 7386 y después restaura la forma canónica de los campos core antes de validar y escribir",
+    "overall-derivado": "verification.checks se promociona; verification.overall lo recalcula el runtime y los parches no pueden escribirlo",
+    "git-sin-merge-textual": "state.json está versionado pero .gitattributes lo marca -merge; una divergencia de ramas falla ruidoso y se resuelve mediante skstate merge",
+    "budget-observable-v1": "check mide bytes de Sigma y composición por colecciones desde v1; no hay límite universal, pero --budget-bytes permite advertencias con un presupuesto explícito"
   },
   "files": {
     "relevant": {
       "arquitectura": "docs/arquitectura.md",
       "decisiones": "docs/adr/",
       "glosario": "CONTEXT.md",
-      "carga-util": "skills/"
+      "carga-util": "skills/",
+      "esquema": "schema/v1.json"
     },
     "modified": {
       "arquitectura": "docs/arquitectura.md",
+      "decisiones": "docs/adr/",
       "carga-util": "skills/",
       "readme": "README.md",
-      "instrucciones": "CLAUDE.md y AGENTS.md"
+      "esquema": "schema/v1.json",
+      "git-attributes": ".gitattributes"
     }
   },
   "verification": {
     "checks": {
       "afirmaciones-claude-code": {
-        "name": "Contraste de 10 afirmaciones sobre Claude Code contra la documentación oficial",
+        "name": "Contraste de comportamiento relevante de Claude Code contra documentación oficial",
         "result": "passed",
-        "details": "5 confirmadas (2 literales), 3 matizadas con consecuencia de diseño, 2 no documentadas y retiradas como argumento. Ninguna falsa. Tabla completa en docs/arquitectura.md"
+        "details": "Permisos Edit(path), anclaje /path y Auto Memory contrastados de nuevo el 2026-09-06"
+      },
+      "git-merge-attribute": {
+        "name": "Semántica de .gitattributes -merge contrastada contra documentación oficial de Git",
+        "result": "passed",
+        "details": "merge unset conserva provisionalmente nuestra versión y marca conflicto, sin driver externo"
       },
       "esquema-contra-caso-real": {
         "name": "Migración de este mismo estado al esquema nuevo",
         "result": "passed",
-        "details": "Las claves de 2-4 palabras bastaron para todo el contenido. Al forzar slugs semánticos se detectó que la mitad del estado anterior era cronología ('Q1 cerrada', 'Q2 cerrada') y duplicaba los ADR; el estado quedó en un tercio"
+        "details": "Los slugs de 1-4 palabras cubren el contenido real; project_id, canonicalización y campos derivados quedan definidos antes de implementar la v1"
       }
     },
     "overall": "passed"

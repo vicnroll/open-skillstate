@@ -2,55 +2,88 @@
 status: accepted
 ---
 
-# El histórico vive en un almacén local que el agente de trabajo no alcanza
+# El histórico vive fuera del repositorio y no se expone al agente de trabajo
 
-El [ADR 0010](./0010-se-instrumenta-el-estado-no-los-tokens.md) decidió qué medir pero no dónde ponerlo, y al concretarlo aparecieron dos cosas que el diseño no había mirado.
+El [ADR 0010](./0010-se-instrumenta-el-estado-no-los-tokens.md) decidió qué medir pero no dónde ponerlo. Las preguntas de instrumentación son transversales — crecimiento de Σ, uso de campos, conflictos de `merge` — y se contestan mejor cruzando proyectos que creando un fichero de métricas independiente en cada repositorio.
 
-La primera: **las preguntas que la instrumentación debe responder no son del usuario, son nuestras**. ¿Es ruidosa la promoción por campo del [ADR 0006](./0006-merge-promueve-un-subconjunto-y-falla-ruidoso.md)? ¿Se usan de verdad los campos extendidos que el [ADR 0003](./0003-esquema-por-niveles-y-serializacion-dinamica.md) supone poco frecuentes? Eso se contesta meses después y **a través de varios proyectos**. Un fichero por repositorio que nadie agrega no lo responde: sólo mide los repositorios que ejecutemos nosotros.
+Además, auditar pasos, decisiones y acciones para aprender de ellos es compatible con SKILL.state siempre que esa cronología **no vuelva a entrar automáticamente en el contexto del agente que ejecuta**.
 
-La segunda: **querer auditar pasos, decisiones y acciones para aprender de ellos es un objetivo legítimo** que el diseño parecía prohibir, y no lo prohíbe.
+Se decide un **almacén local en SQLite, fuera del repositorio**, escrito de forma transparente por el binario en cada operación y consultable mediante `skstate history`, un subcomando deliberadamente fuera de la superficie normal del agente de trabajo.
 
-Se decide un **almacén local en SQLite, fuera del repositorio**, escrito de forma transparente por el binario principal en cada operación, y legible sólo por `skstate history`, un subcomando oculto.
+## Guardar historia no contradice el patrón
 
-## Por qué guardar historia no contradice el patrón
+El O(T²) que el patrón combate es un problema de *contexto*, no de *almacenamiento*. Una cronología en disco cuesta cero tokens mientras no se inyecte en cada paso.
 
-La objeción evidente es que el [ADR 0005](./0005-estado-jerarquico-bajo-orquestacion.md) sostiene que Σ nunca es un histórico, porque crecer con la cronología reintroduciría el O(T²) que el patrón elimina. Eso **sigue siendo verdad de Σ y deja de serlo de OpenSkillState**, porque la objeción aplicaba mal la tesis del paper: el O(T²) no es un problema de *almacenamiento*, es un problema de *contexto*. Lo que hace daño no es que la cronología exista, es que **entre en el prompt**. Un histórico en disco que nunca llega al modelo cuesta exactamente cero tokens.
+La propiedad que OpenSkillState necesita proteger es:
 
-La propiedad que hay que garantizar, por tanto, no es «no guardar historia» sino **«la historia no es alcanzable desde el modelo que trabaja»**.
+> El flujo normal del agente de trabajo **no recibe, no enlaza y no inyecta** el histórico. `get`, `patch`, `check`, los hooks y la skill de trabajo operan sobre Σ actual, nunca reconstruyen conversación pasada desde SQLite.
 
-## El invariante
+Si alguien propusiera que `get` incluya «las últimas decisiones» o que `SessionStart` recupere automáticamente pasos anteriores, este ADR es la razón para rechazarlo: sería reintroducir por la puerta de atrás el canal cronológico que el producto separa.
 
-> El histórico es **de escritura por el binario principal y de lectura por otra herramienta**. Ningún comando de `skstate` devuelve datos del histórico: ni completos, ni resumidos, ni agregados, ni como contexto. Ni el `SKILL.md`, ni `references/`, ni el fragmento de instrucciones, ni `--help` lo mencionan.
->
-> Si alguna vez alguien propone que `get` incluya un resumen de lo anterior, o que el hook `SessionStart` inyecte las últimas decisiones, la respuesta es **no**, y este ADR es el motivo: sería reintroducir por la puerta de atrás exactamente el O(T²) que el producto elimina por la principal.
+## No es una frontera de seguridad
 
-## Por qué el mismo binario basta, y dónde estaba el riesgo de verdad
+La formulación inicial decía que el histórico era «inalcanzable» desde el agente. Es demasiado fuerte. `skstate history` vive en el mismo binario y un agente con acceso general a shell podría descubrir o adivinar el comando.
 
-Se consideró un binario aparte, `skstate history`, que no se instalase con el kit: lo que no está en la máquina no se ejecuta, y eso es una barrera física en vez de una convención. Se descartó porque **el objetivo no es impedir todo acceso**, sino impedir que se contamine el agente que trabaja — de hecho se quiere explícitamente que un **agente analista dedicado**, independiente del que trabaja en el proyecto, pueda explotar los datos. Con ese objetivo, que la skill de trabajo no lo mencione cubre el caso real, porque el agente sólo llegaría al histórico si supiera que existe.
+La garantía real es de **no exposición y no inyección**, no de aislamiento de seguridad:
 
-El riesgo serio está en otro sitio y es el que obliga a una decisión: **la skill del analista no puede instalarse en el proyecto**. Claude Code carga todas las skills del repositorio, y la *descripción* de una skill es precisamente lo que hace que un agente la invoque por su cuenta — la nuestra dice literalmente *«invoke autonomously whenever durable execution continuity would help»*. Una skill vecina que anuncie «puedo consultar todo lo registrado» se invocaría justo cuando el agente creyera que le vendría bien contexto previo. Sería un final irónico: construir todo el aislamiento y luego instalar el atajo al lado.
+- `skstate --help` no anuncia `history`;
+- la skill de trabajo y sus referencias no lo mencionan;
+- ningún hook lo consulta;
+- ningún comando normal devuelve ni resume datos históricos;
+- no existe una herramienta MCP de trabajo que lo publique.
 
-Además las dos skills **se contradicen si se cargan juntas**: una dice que el estado describe el presente y que nunca hace falta reconstruir la transcripción anterior; la otra ofrece la cronología completa.
+Esto cubre el riesgo relevante — contaminar accidentalmente el contexto operativo — sin fingir que ocultar un subcomando es un sandbox.
 
-Por eso son **dos instalaciones explícitas en ámbitos distintos**. El `init` normal no toca la del analista; `skstate init --history-skill` la instala a nivel de usuario o en el espacio de trabajo del analista, nunca en el repositorio del proyecto.
+## La skill analista vive en otro ámbito
 
-## Decisiones técnicas que van con esto
+Se quiere permitir un **agente analista dedicado** que explote el histórico. Su skill se instala explícitamente a nivel de usuario o en un workspace de análisis, nunca dentro del repositorio del proyecto.
 
-- **Driver de SQLite en Go puro** (`modernc.org/sqlite`). El driver más común exige cgo, que rompe el enlazado estático y la compilación cruzada — es decir, el [ADR 0001](./0001-cli-como-binario-compilado.md) entero. Si por algún motivo acabáramos necesitando cgo, la decisión correcta sería volver a un fichero plano, no romper el 0001.
-- **WAL**, porque aquí la concurrencia sí es el caso normal: varios workers escriben métricas a la vez. Contrasta a propósito con el [ADR 0011](./0011-cerrojo-de-fichero-en-lugar-de-compare-and-swap.md), donde un cerrojo simple bastaba porque la concurrencia era rara.
-- **El proyecto se identifica por nombre**, en un campo `project` de nivel `meta` en `state.json`. No depende de rutas, así que mover el repositorio no parte la serie, y renombrar es un parche corriente. El campo vive en el estado porque es el único fichero que el CLI ya posee: no hacen falta ficheros nuevos.
-- **`skstate history <subcomando>`**, no `--history` ni `-h`. `-h` es `--help` en prácticamente toda CLI que existe, y una bandera que enruta subcomandos es una forma equivocada.
+Una skill vecina que anunciase «puedo consultar todo lo registrado» competiría con la skill de trabajo y podría ser invocada precisamente cuando el agente quisiera recuperar contexto previo. Las dos responsabilidades deben permanecer separadas.
 
-## Lo que se asume con los ojos abiertos
+`skstate init` normal no instala esa skill. Una instalación específica como `skstate init --history-skill` puede hacerlo en un ámbito no asociado al proyecto operativo.
 
-Guardar pasos, decisiones y acciones significa guardar los parches, y los parches **son contenido del proyecto**: objetivos, hechos sobre el código, rutas, decisiones. El almacén deja de ser un registro de recuentos y pasa a ser **un archivo local y duradero de todo lo que OpenSkillState ha visto**, en todos los proyectos de la máquina, que sobrevive a borrar el repositorio. Eso exige tres cosas que antes no hacían falta:
+## Identidad del proyecto
 
-- **Retención y borrado explícitos** — `skstate history purge`, por proyecto y por antigüedad. Un archivo que sólo crece y que nadie puede vaciar es un problema, no una función.
-- **La exportación OTLP deja de ser inocua.** Exportar recuentos a un backend de observabilidad no tiene consecuencias; exportar contenido es sacar de la máquina las notas de diseño del código. Cuando llegue esa fase tienen que ser dos caminos distintos, y conviene dejarlo escrito antes de que alguien lo construya como uno solo.
-- **El aviso de no guardar secretos sube de categoría.** Hoy es un consejo del skill y lo que se ensucia es Σ, que se corrige con un parche. Con archivo permanente, un secreto escrito por error se queda hasta que alguien lo purgue.
+El histórico **no se agrupa por ruta ni por nombre**. Cada evento lleva el `project_id` estable definido en el [ADR 0019](./0019-identidad-estable-del-proyecto.md); `project` es sólo una etiqueta de presentación.
+
+Esto evita tres fallos de la propuesta anterior:
+
+- mover el repositorio no parte la serie;
+- renombrarlo no crea otra serie;
+- dos repositorios llamados igual no mezclan eventos.
+
+Los workers heredan el mismo `project_id`, de modo que la instrumentación de ejecuciones paralelas sigue perteneciendo al mismo proyecto sin depender del mecanismo de aislamiento.
+
+## Decisiones técnicas
+
+- **SQLite en Go puro** (`modernc.org/sqlite`). Un driver que exija cgo rompería la distribución estática y compilación cruzada del [ADR 0001](./0001-cli-como-binario-compilado.md).
+- **WAL**, porque varios procesos pueden registrar eventos al mismo tiempo aunque sus Σ estén aislados.
+- **Eventos compatibles conceptualmente con OTel**: timestamp, operación y atributos escalares. Eso no implica exportar contenido ni acoplarse a OTLP en v1.
+- **`skstate history <subcomando>`**, no una bandera de `skstate`; es una superficie distinta con su propio propósito.
+
+## Contenido sensible y retención
+
+Guardar parches, objetivos, decisiones y acciones significa guardar **contenido del proyecto**, no sólo contadores. El almacén puede sobrevivir a borrar el repositorio y puede contener información que el usuario no esperaba conservar indefinidamente.
+
+Por eso forman parte del diseño:
+
+- `skstate history purge`, por `project_id` y por antigüedad;
+- separación entre exportar **métricas** y exportar **contenido** cuando exista OTLP u otro backend;
+- la recomendación de no guardar secretos en Σ, reforzada porque un secreto escrito una vez puede persistir también en el histórico hasta ser purgado.
+
+`uninstall` y `deinit` no purgan historia por defecto ([ADR 0012](./0012-init-completa-la-instalacion.md)). `deinit --purge-history` puede hacerlo de forma explícita antes de destruir el workspace y perder su `project_id`.
 
 ## Consequences
 
-- **El ADR 0010 queda absorbido en parte.** Lo que decidió —medir el estado y no los tokens— sigue en pie; dónde va el dato lo responde este ADR, y la respuesta resulta ser mejor que un fichero por repositorio porque permite la consulta que cruza proyectos, que era justo la que el 0010 necesitaba.
-- **Aparece un segundo esquema con su propio versionado**, el del almacén. Se tratan a propósito de forma distinta: los datos de Σ son preciosos y su migración es explícita ([ADR 0014](./0014-migracion-explicita-de-schema-version.md)); los del histórico no lo son, y si su esquema cambia se puede recrear la tabla. Decirlo evita que alguien construya para las métricas la maquinaria que sólo Σ merece.
-- **La forma de la fila ya es compatible con OTel** — un evento con marca temporal, nombre de operación y atributos escalares — sin necesidad de diseñar para ello. Basta con no diseñar en contra.
+- El histórico permite análisis longitudinal sin convertirlo en memoria automática del agente de trabajo.
+- La garantía se expresa correctamente como **no exposición**, no como inaccesibilidad física.
+- La identidad estable permite consultas cruzadas sin depender de paths o nombres.
+- Aparece un segundo esquema local, el de SQLite, con un ciclo de vida distinto del esquema de Σ. Sus migraciones pueden ser más pragmáticas porque no forma parte del contrato portable del proyecto.
+- El [ADR 0020](./0020-presupuesto-de-estado.md) puede usar el histórico para estudiar crecimiento real de Σ y justificar futuros budgets recomendados.
+
+## Considered Options
+
+- **Histórico dentro de `.openskillstate/`** — descartado: dificulta análisis cruzado y lo acerca innecesariamente al contexto del agente.
+- **No guardar ninguna cronología** — descartado: elimina la posibilidad de evaluar decisiones del propio diseño sin mejorar el coste de contexto.
+- **Binario separado como frontera física** — descartado: el objetivo es evitar exposición accidental, no impedir que un analista autorizado consulte los datos.
+- **Usar `project` como clave** — descartado y sustituido por `project_id` en el ADR 0019.
