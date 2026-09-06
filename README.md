@@ -4,7 +4,7 @@ Execution state for coding agents, kept as a validated structured file instead o
 
 An open, opinionated implementation of the **SKILL.state** pattern from *Scalable Long-Horizon Agent Skills* ([arXiv:2608.26263v3](https://arxiv.org/html/2608.26263v3)) — with its own decisions where the paper's model does not fit how coding agents actually work. `skstate` is its CLI.
 
-> **Status: design complete, not implemented.** The architecture is settled and recorded — see [`docs/arquitectura.md`](./docs/arquitectura.md) and the 18 decision records in [`docs/adr/`](./docs/adr/). The binary does not exist yet, so this README documents the design rather than a working install.
+> **Status: design complete, not implemented.** The architecture is settled, but the binary does not exist yet — so this README documents the design rather than a working install.
 
 ## The idea
 
