@@ -1,57 +1,89 @@
-# SKILL.state repository kit
+# skillstate
 
-Drop-in template for using the SKILL.state execution-state pattern with interactive Codex, Claude Code, and OpenCode sessions.
+Execution state for coding agents, kept as a validated structured file instead of as conversational history.
 
-## What is included
+Based on *SKILL.state: Scalable Long-Horizon Agent Skills* ([arXiv:2608.26263v3](https://arxiv.org/html/2608.26263v3)).
+
+> **Status: design complete, not implemented.** The architecture is settled and recorded — see [`docs/arquitectura.md`](./docs/arquitectura.md) and the 14 decision records in [`docs/adr/`](./docs/adr/). The binary does not exist yet, so this README documents the design rather than a working install.
+
+## The idea
+
+An agent working a long task accumulates its own transcript, and every step carries all previous steps into the next prompt. That grows quadratically and drags stale reasoning forward. The alternative is to keep an explicit, bounded **execution state** — Σ — and rebuild each step's prompt from the task, that state, and the current observation.
 
 ```text
-.
-├── .skillstate/
-│   ├── procedure.md
-│   └── state.json
-├── .agents/skills/skill-state/SKILL.md    # Codex
-├── .claude/skills/skill-state/SKILL.md   # Claude Code
-├── .opencode/skills/skill-state/SKILL.md # OpenCode
-├── AGENTS.md
-└── CLAUDE.md
+conversational                            skillstate
+
+step 1  [ P + O₁ ]                        step 1  [ P + Σ₁ + O₁ ]
+step 2  [ P + O₁R₁a₁ + O₂ ]               step 2  [ P + Σ₂ + O₂ ]
+step 3  [ P + O₁R₁a₁ + O₂R₂a₂ + O₃ ]      step 3  [ P + Σ₃ + O₃ ]
+
+        ^ grows with history                      ^ bounded
 ```
 
-The three `SKILL.md` files intentionally contain the same portable skill. They are duplicated only so each client finds it in its native project-level location.
+## What makes it hold
 
-## Integrating into an existing repository
+The agent **never writes the state file**. A small binary owns the schema, validates every change, applies the merge and writes atomically — so a malformed output cannot corrupt persistent state.
 
-1. Copy `.skillstate/` into the repository root.
-2. Copy the skill directory for each agent you use, or keep all three.
-3. **Do not replace an existing `AGENTS.md` or `CLAUDE.md`.** Merge only the `SKILL.state execution continuity` section into the project's existing instruction file.
-4. Keep the rest of the project's normal architecture, build, test, style, security, and review instructions unchanged.
+```bash
+skillstate patch --stdin <<'EOF'
+{ "facts": { "auth-in-middleware": "Auth is enforced in middleware/auth.go, not in handlers" } }
+EOF
+```
 
-Once installed, the user should work normally. They do **not** need to say "use SKILL.state", "read state.json", or similar wording. The durable project instructions tell the agent when to activate the skill autonomously.
+Patches are [RFC 7386 JSON Merge Patch](https://datatracker.ietf.org/doc/html/rfc7386) with no extensions. Collections are objects keyed by content-derived slugs, so a patch costs proportional to what changed, `null` deletes a single item, and restating a known fact overwrites its key instead of accumulating a near-duplicate.
 
-## How the workflow behaves
+## Guarantees, stated honestly
 
-For non-trivial work the agent should automatically:
+| Level | Mechanism | Where |
+|---|---|---|
+| Prevention | A `deny` permission rule stops the model editing the file by hand | Claude Code only |
+| Detection | The CLI keeps an integrity hash outside the file and compares on every operation | Everywhere |
+| Input validation | JSON Schema on the tool input, checked by the client | Where an MCP server is configured |
 
-1. load the SKILL.state procedure and current state;
-2. initialize or resume the current objective;
-3. work normally in the repository;
-4. update state at meaningful checkpoints;
-5. leave a concrete `next_action` when work remains;
-6. resume from that state when a later session starts with fresh conversational context.
+Enforcement is not portable — permission rules and hooks are client-specific. Detection is, so a direct write is always at least *loud*, even where it cannot be blocked. The threat model is a model taking a shortcut, not an adversary.
 
-`state.json` is execution continuity, not project memory and not a transcript.
+## Under orchestration
 
-## Important limitation of interactive clients
+This is where the pattern actually pays off, because a worker launched headlessly starts cold and Σ is all it receives.
 
-The skill can maintain explicit state autonomously, but a repository skill cannot force Codex, Claude Code, or OpenCode to erase the current chat transcript. The strongest approximation to the paper is obtained when a fresh session/context is periodically used for long-running work. The package is designed so that, after such a reset, the agent can resume from `.skillstate/state.json` without the user re-explaining the task.
+```text
+   orchestrator ── consolidated Σ (versioned)
+        │
+        ├── worktree A ── ephemeral Σ (ignored)  ──┐
+        ├── worktree B ── ephemeral Σ (ignored)  ──┤── skillstate merge
+        └── worktree C ── ephemeral Σ (ignored)  ──┘
+```
 
-Do not use conversation compaction as a substitute for state discipline: information needed after a reset should already be represented in the repository or in `state.json`.
+Each worker writes only its own Σ, so nothing contends. `merge` **promotes a declared subset** — what survives the task, not what dies with it — and stops with an error when two workers wrote the same key with different content, rather than silently picking one.
 
-## Mutable state and Git
+## Commands
 
-`.skillstate/state.json` is intentionally mutable execution state. Decide per project whether it should be committed, ignored, or handled with another local policy. This kit does not impose a Git policy because team workflows differ.
+| Command | |
+|---|---|
+| `get` | Render Σ, omitting empty fields. `--raw` dumps the file |
+| `patch` | Apply an RFC 7386 patch from stdin |
+| `check` | Validate, detect schema drift and direct writes |
+| `init` | Install into a repository |
+| `merge` | Promote a worker's Σ into the orchestrator's |
+| `migrate` | Move state between schema versions, with a backup |
 
-## Reference
+## Limits
 
-Pattern based on *SKILL.state: Scalable Long-Horizon Agent Skills* (arXiv:2608.26263v2):
+**Strict state discipline is not universally good.** Section 7 of the paper names three cases where its premise fails, and debugging, auditing and exploring fall in them: you do not know at step 3 which observation from step 1 will matter. That is what `mode: exploration` exists for, and using it is not a workaround — it is the correct mode for that work.
 
-https://arxiv.org/html/2608.26263v2
+**Compaction is not an implementation of this.** A lossy summary reintroduces exactly the context poisoning the pattern attacks. It is what happens when the context plane fails.
+
+**Resumability is encouraged, not guaranteed.** The `Stop` hook that checks for a concrete `next_action` is capped at a limited number of consecutive blocks by the client, so it nudges once and yields.
+
+## Layout
+
+```text
+.skillstate/
+├── schema.json      # the schema the CLI owns
+└── state.json       # Σ
+
+.claude/skills/skill-state/    # Claude Code
+.agents/skills/skill-state/    # other agents
+├── SKILL.md
+└── references/schema.md       # loaded on demand
+```

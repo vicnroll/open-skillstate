@@ -1,0 +1,126 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/vicnroll/skill-state-kit/schema/v1",
+  "title": "skillstate execution state",
+  "description": "Sigma: bounded current execution state. Never a transcript, never a chronology. x-tier controls serialization in `skillstate get`; x-promote controls what `skillstate merge` lifts from a worker to the orchestrator.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "status", "mode"],
+
+  "$defs": {
+    "slug": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+(-[a-z0-9]+){0,3}$",
+      "description": "Content-derived key: kebab-case, 2-4 words, no accents."
+    },
+    "slugMap": {
+      "type": "object",
+      "propertyNames": { "$ref": "#/$defs/slug" },
+      "additionalProperties": { "type": "string" }
+    }
+  },
+
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 1,
+      "x-tier": "meta",
+      "description": "A value newer than the binary understands is always rejected, never guessed at."
+    },
+
+    "status": {
+      "enum": ["idle", "active", "blocked", "completed"],
+      "x-tier": "core",
+      "x-promote": false
+    },
+    "mode": {
+      "enum": ["execution", "exploration"],
+      "default": "execution",
+      "x-tier": "core",
+      "x-promote": false,
+      "description": "In exploration the Stop hook does not require a concrete next_action."
+    },
+    "objective": {
+      "type": ["string", "null"],
+      "x-tier": "core",
+      "x-promote": false
+    },
+    "next_action": {
+      "type": ["string", "null"],
+      "x-tier": "core",
+      "x-promote": false,
+      "description": "One concrete step, actionable by a fresh session with no prior transcript."
+    },
+
+    "facts": {
+      "$ref": "#/$defs/slugMap",
+      "x-tier": "core",
+      "x-promote": true
+    },
+    "decisions": {
+      "$ref": "#/$defs/slugMap",
+      "x-tier": "core",
+      "x-promote": true
+    },
+
+    "files": {
+      "type": "object",
+      "additionalProperties": false,
+      "x-tier": "core",
+      "properties": {
+        "relevant": { "$ref": "#/$defs/slugMap", "x-promote": false },
+        "modified": { "$ref": "#/$defs/slugMap", "x-promote": true }
+      }
+    },
+
+    "verification": {
+      "type": "object",
+      "additionalProperties": false,
+      "x-tier": "core",
+      "x-promote": true,
+      "properties": {
+        "checks": {
+          "type": "object",
+          "propertyNames": { "$ref": "#/$defs/slug" },
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "result"],
+            "properties": {
+              "name": { "type": "string" },
+              "result": { "enum": ["passed", "failed", "not_run"] },
+              "details": { "type": "string" }
+            }
+          }
+        },
+        "overall": { "enum": ["not_run", "partial", "passed", "failed"] }
+      }
+    },
+
+    "hypotheses": {
+      "type": "object",
+      "x-tier": "extended",
+      "x-promote": false,
+      "propertyNames": { "$ref": "#/$defs/slug" },
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["statement", "status"],
+        "properties": {
+          "statement": { "type": "string" },
+          "status": { "enum": ["open", "confirmed", "rejected"] }
+        }
+      }
+    },
+    "blockers": {
+      "$ref": "#/$defs/slugMap",
+      "x-tier": "extended",
+      "x-promote": false
+    },
+    "constraints": {
+      "$ref": "#/$defs/slugMap",
+      "x-tier": "extended",
+      "x-promote": true
+    }
+  }
+}

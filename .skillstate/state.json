@@ -1,0 +1,53 @@
+{
+  "schema_version": 1,
+  "status": "active",
+  "mode": "execution",
+  "objective": "Diseñar skillstate: llevar el patrón SKILL.state (arXiv:2608.26263v3) a un producto funcional, sustituyendo el prototipo de sólo texto que había en este repositorio",
+  "next_action": "Implementar el CLI en Go, empezando por get, patch y check, que son el plano de estado completo y lo único portable",
+
+  "facts": {
+    "diseno-cerrado-sin-implementar": "El diseño está cerrado y documentado, pero el binario no existe: no hay ningún .go, package.json ni ejecutable en el repositorio",
+    "decisiones-en-adr": "Las 14 decisiones de diseño y su porqué viven en docs/adr/0001 a 0014; docs/arquitectura.md describe el conjunto y CONTEXT.md fija el vocabulario. No reargumentar lo que ya está ahí",
+    "prototipo-no-normativo": "El prototipo anterior (sólo texto, basado en la v2 del paper) está superado y fuera del árbol de trabajo: sólo existe como el commit inicial 4d7b571. No restaurarlo ni alinearse con lo que prometían su README ni su procedure.md",
+    "idioma-por-artefacto": "Artefactos distribuibles en inglés (SKILL.md, README.md, schema.json, instructions-fragment.md); artefactos de diseño en español (arquitectura.md, ADR, CONTEXT.md)",
+    "syntony-es-el-runtime": "Syntony (github.com/vicnroll/syntony, privado, Go, pre-alpha) es el orquestador headless que despacha workers vía codex exec, claude -p y opencode serve. Es el caso de uso fuerte del patrón y comparte lenguaje con este CLI",
+    "carga-util-en-skills": "skills/ contiene lo que init instalará: la skill duplicada en .claude/ y .agents/, el esquema, el estado inicial y el fragmento para CLAUDE.md/AGENTS.md"
+  },
+
+  "decisions": {
+    "esquema-codificado-en-json": "schema.json lleva anotaciones x-tier y x-promote, de modo que qué se serializa y qué promueve merge son datos declarados, no lógica escrita en el binario",
+    "estado-propio-sin-binario": "Mientras el CLI no exista, este .skillstate/state.json se mantiene a mano como notas de diseño. Es la excepción, no el patrón que el producto predica",
+    "sin-procedure-md": "procedure.md desaparece del diseño: el CLI valida lo que ese fichero pedía y la guía semántica restante vive en la skill"
+  },
+
+  "files": {
+    "relevant": {
+      "arquitectura": "docs/arquitectura.md",
+      "decisiones": "docs/adr/",
+      "glosario": "CONTEXT.md",
+      "carga-util": "skills/"
+    },
+    "modified": {
+      "arquitectura": "docs/arquitectura.md",
+      "carga-util": "skills/",
+      "readme": "README.md",
+      "instrucciones": "CLAUDE.md y AGENTS.md"
+    }
+  },
+
+  "verification": {
+    "checks": {
+      "afirmaciones-claude-code": {
+        "name": "Contraste de 10 afirmaciones sobre Claude Code contra la documentación oficial",
+        "result": "passed",
+        "details": "5 confirmadas (2 literales), 3 matizadas con consecuencia de diseño, 2 no documentadas y retiradas como argumento. Ninguna falsa. Tabla completa en docs/arquitectura.md"
+      },
+      "esquema-contra-caso-real": {
+        "name": "Migración de este mismo estado al esquema nuevo",
+        "result": "passed",
+        "details": "Las claves de 2-4 palabras bastaron para todo el contenido. Al forzar slugs semánticos se detectó que la mitad del estado anterior era cronología ('Q1 cerrada', 'Q2 cerrada') y duplicaba los ADR; el estado quedó en un tercio"
+      }
+    },
+    "overall": "passed"
+  }
+}

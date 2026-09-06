@@ -1,0 +1,10 @@
+# Ephemeral worker state under orchestration (ADR 0008)
+.skillstate/worker-state.json
+
+# Integrity record kept outside the state file (ADR 0009)
+.skillstate/.integrity
+
+.DS_Store
+
+# Configuración local de herramientas ajenas al proyecto
+.farshid/

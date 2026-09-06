@@ -1,112 +1,117 @@
 ---
 name: skill-state
-description: Maintain explicit execution state for non-trivial repository work that may span multiple tool calls, edits, debugging or test cycles, user turns, context compaction, or sessions. Invoke autonomously whenever durable execution continuity would help; do not wait for the user to mention SKILL.state. Skip simple one-shot Q&A and tiny atomic tasks that need no continuity.
-compatibility: Codex, Claude Code, OpenCode
+description: Maintain explicit execution state for non-trivial repository work that may span multiple tool calls, edits, debugging or test cycles, user turns, context compaction, or sessions. Invoke autonomously whenever durable execution continuity would help; do not wait for the user to mention it. Skip simple one-shot Q&A and tiny atomic tasks that need no continuity.
+compatibility: Claude Code, other AI coding agents
 ---
 
-# SKILL.state
+# skillstate
 
-Use explicit mutable execution state so repository work can continue correctly without depending on prior conversational history.
+Keep execution state in a validated structured file instead of in conversational history, so work continues correctly across turns, compaction and fresh sessions.
 
-This skill is an operational adaptation of the SKILL.state pattern for interactive coding agents. The canonical repository procedure is `.skillstate/procedure.md`; the mutable execution state is `.skillstate/state.json`.
+**You never write the state file directly.** The `skillstate` binary owns the schema, validates every change and writes atomically. You read state with `skillstate get` and change it with `skillstate patch`. Editing the file by hand is blocked where the client supports it, and detected everywhere else.
 
-## Autonomous activation
+## When to use this
 
-Invoke this skill yourself when the task is non-trivial and execution continuity is useful. Typical triggers include:
+Invoke this yourself when work is non-trivial and continuity is useful: investigation followed by implementation, multi-file changes, debugging or repeated test/fix cycles, refactors and migrations, or anything likely to span several turns or sessions.
 
-- investigation followed by implementation;
-- multi-file changes;
-- debugging or repeated test/fix cycles;
-- refactors and migrations;
-- work likely to span several user turns;
-- work that may cross context compaction or a new agent session.
+Do not use it for simple explanatory Q&A or a tiny atomic task you can finish immediately. Do not ask the user to name this skill or remind you to read state.
 
-Do not require the user to name this skill, mention SKILL.state, or remind you to read state.
+## Starting
 
-Do not activate it for simple explanatory Q&A or tiny atomic work that can be completed immediately without continuity.
+Before substantial work:
 
-## Required startup behavior
+```bash
+skillstate get
+```
 
-For an applicable task, before substantial work:
+Compare the user's latest request against what comes back. If it is the same objective, reconcile with the current repository and continue from `next_action`. If it is a different objective, or state is `idle`/`completed`, reinitialize for the new task. The user's latest instruction and the current repository always win over stale state.
 
-1. Read `.skillstate/procedure.md`.
-2. Read `.skillstate/state.json`.
-3. Compare the user's latest request with the current state.
-4. If the state represents the same active objective, reconcile it with the current repository and continue from `next_action`.
-5. If the state is idle/completed or represents a different objective, initialize it for the new task according to the procedure.
-6. Never follow stale state over the user's latest instruction or the current repository.
+## Changing state
 
-Do this without asking the user for SKILL.state-specific confirmation.
+Send a JSON Merge Patch (RFC 7386) on stdin. Only what changes:
 
-## During work
+```bash
+skillstate patch --stdin <<'EOF'
+{
+  "facts": { "auth-in-middleware": "Auth is enforced in middleware/auth.go, not in handlers" },
+  "next_action": "Add the missing timeout test to auth_test.go"
+}
+EOF
+```
 
-Work normally with the repository and available tools. Treat the filesystem and current tool observations as the live source of truth.
+Keys absent from the patch are untouched. `null` deletes:
 
-Update `.skillstate/state.json` at meaningful checkpoints, not after every tool call. A checkpoint exists when information necessary for a future fresh session changes, such as:
+```bash
+skillstate patch --stdin <<'EOF'
+{ "blockers": { "waiting-on-api-key": null } }
+EOF
+```
 
-- objective or acceptance criteria;
-- durable facts;
-- decisions;
-- useful hypotheses;
-- relevant or modified files;
-- verification outcomes;
-- blockers;
-- the next concrete action.
+### Collection keys are content slugs
 
-Follow the state shape and lifecycle rules in `.skillstate/procedure.md` exactly.
+Collections (`facts`, `decisions`, `blockers`, `constraints`, `files.*`) are objects, not arrays. You choose each key by compressing the content into a slug:
 
-## State discipline
+- kebab-case, 2 to 4 words, no accents, `^[a-z0-9]+(-[a-z0-9]+){0,3}$`
+- derive it from the item itself — `auth-in-middleware`, `api-must-stay-compatible`
+- reuse the same slug when restating the same item, so the write is idempotent instead of creating a near-duplicate
 
-The state must represent the present execution state, not the chronology of the conversation.
+The CLI rejects keys that do not match the pattern.
 
-Preserve:
+## The state shape
 
-- verified facts needed later;
-- user constraints and acceptance criteria;
-- implementation decisions future steps must respect;
-- concise verification outcomes;
-- unresolved blockers;
-- one concrete `next_action`.
+| Field | Meaning |
+|---|---|
+| `status` | `idle` \| `active` \| `blocked` \| `completed` |
+| `mode` | `execution` \| `exploration` |
+| `objective` | What this task is, in one sentence |
+| `next_action` | One concrete next step, actionable without the prior conversation |
+| `facts` | Verified durable findings not worth rediscovering each step |
+| `decisions` | Decisions later steps must respect, with rationale where it matters |
+| `files` | `relevant` and `modified` |
+| `verification` | `checks` and `overall` |
 
-Do not preserve:
+Three more fields exist for cases that need them — `hypotheses`, `blockers`, `constraints`. They are documented in [`references/schema.md`](./references/schema.md); read it when one of them applies. They do not appear in `skillstate get` output until they have content, so an absent field means empty, not missing.
 
-- chain-of-thought or private reasoning;
-- narrative such as "first I did X, then I did Y";
-- copied conversation history;
-- raw logs when a concise result is enough;
-- stale or duplicate information;
-- secrets or credentials.
+## Execution mode and exploration mode
 
-If a fact can be cheaply and reliably recovered from the current repository, prefer the repository over bloating the state unless retaining the fact prevents meaningful repeated investigation.
+Set `mode` to `exploration` when debugging, auditing or exploring — when you do not yet know which observations will matter, and forcing them into structured state would distort the work. In this mode nothing requires you to keep a concrete `next_action`.
 
-## User follow-ups
+Switch back to `execution` when the objective becomes concrete. Changing mode is a patch like any other:
 
-On each follow-up message for the same task:
+```bash
+skillstate patch --stdin <<'EOF'
+{ "mode": "execution", "next_action": "Fix the nil check in parser.go:88" }
+EOF
+```
 
-- incorporate new constraints or changed acceptance criteria into state when they affect later work;
-- continue the active objective without asking the user to restate prior information already stored or visible in the repository;
-- if the user clearly changes to a different task, the new instruction wins and the active task state is reinitialized rather than blindly following the old `next_action`.
+## What belongs in state, and what does not
 
-## Before finishing a work block
+Keep: verified facts needed later, constraints from the user, decisions future steps must respect, concise verification outcomes, unresolved blockers, and one concrete `next_action`.
 
-Before the final response for a non-trivial work block:
+Never store: chain-of-thought or private reasoning, narration of what you did in what order, copied conversation history, raw logs where a short result suffices, stale or duplicated entries, secrets or credentials.
 
-1. Reconcile `state.json` with what actually changed.
-2. Record material verification results.
-3. Set an accurate `next_action` if work remains.
-4. If complete, set `status` to `completed`, `phase` to `complete`, and `next_action` to `null`.
-5. Keep the state concise and valid JSON.
+The state describes **the present, not the chronology**. If a fact is cheap to recover from the repository, prefer the repository over enlarging the state — unless keeping it prevents repeating real investigation.
 
-Do not announce routine state maintenance unless the user asks about it or a state inconsistency materially affects the task.
+## Cadence
 
-## Fresh sessions and context loss
+Patch at meaningful checkpoints, not after every tool call. A checkpoint is when something a future fresh session would need has changed: the objective, a durable fact, a decision, verification results, blockers appearing or clearing, or the next action.
 
-When working in a fresh chat/session, do not depend on the previous conversation. Reconstruct only the minimum needed execution context from:
+Always patch before your final response for a work block, and before anything likely to reset context.
 
-1. `.skillstate/procedure.md`;
-2. `.skillstate/state.json`;
-3. the current repository and fresh observations.
+Do not report routine state maintenance to the user unless they ask, or unless the state itself reveals a problem affecting the task.
 
-If the client compacts or resets conversation context, ensure durable execution information has been captured in state before relying on that reset.
+## Finishing
 
-A fresh session should be able to continue from `objective` + current repository + `next_action` without access to the prior transcript.
+When the objective is genuinely complete and verified:
+
+```bash
+skillstate patch --stdin <<'EOF'
+{ "status": "completed", "next_action": null }
+EOF
+```
+
+Leave the completed state in place. It gets reinitialized when a different objective starts.
+
+## Fresh sessions
+
+A fresh session continues from `skillstate get` plus the current repository. Do not try to reconstruct the previous transcript, and do not ask the user to restate what is already in state or visible in the repository.
