@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "status": "idle",
+  "objective": null,
+  "phase": null,
+  "acceptance_criteria": [],
+  "constraints": [],
+  "facts": [],
+  "decisions": [],
+  "hypotheses": [],
+  "files": {
+    "relevant": [],
+    "modified": []
+  },
+  "verification": {
+    "checks": [],
+    "overall": "not_run"
+  },
+  "blockers": [],
+  "next_action": null
+}
