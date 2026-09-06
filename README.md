@@ -22,7 +22,7 @@ step 3  [ P + O₁R₁a₁ + O₂R₂a₂ + O₃ ]      step 3  [ P + Σ₃ + O�
 
 ## What makes it hold
 
-The agent **never writes the state file**. A small binary owns the schema, validates every change, applies the merge and writes atomically — so a malformed output cannot corrupt persistent state.
+The agent **does not write the state file**. It proposes a patch; a small binary owns the schema, validates it, applies the merge and writes atomically, so a malformed patch cannot corrupt persistent state. That is the rule the skill teaches — how strictly it can be enforced depends on the client, and the table below says so plainly.
 
 ```bash
 skstate patch --stdin <<'EOF'
@@ -54,7 +54,9 @@ This is where the pattern actually pays off, because a worker launched headlessl
         └── worktree C ── ephemeral Σ (ignored)  ──┘
 ```
 
-Each worker writes only its own Σ, so nothing contends. `merge` **promotes a declared subset** — what survives the task, not what dies with it — and stops with an error when two workers wrote the same key with different content, rather than silently picking one.
+Each worker writes only its own Σ, so nothing contends. Declaring one is a single step when the worktree is created — `skstate init --worker` — and from then on every command in that directory finds the ephemeral state on its own, with no flag to repeat. The two files need different names because worktrees share the repository's `.gitignore`, and a worker's Σ must never enter Git: otherwise Git would three-way-merge a file that `merge` already knows how to merge semantically.
+
+`merge` **promotes a declared subset** — what survives the task, not what dies with it — and stops with an error when two workers wrote the same key with different content, rather than silently picking one.
 
 ## Commands
 
@@ -62,8 +64,8 @@ Each worker writes only its own Σ, so nothing contends. `merge` **promotes a de
 |---|---|
 | `get` | Render Σ as compact JSON, omitting empty fields. `--pretty` indents, `--raw` dumps the file |
 | `patch` | Apply an RFC 7386 patch from stdin |
-| `check` | Validate, detect schema drift and direct writes |
-| `init` | Install into a repository |
+| `check` | Validate the state, report a schema-version mismatch, and flag a file that changed outside the CLI |
+| `init` | Install into a repository. `--worker` declares an ephemeral state in a worktree |
 | `merge` | Promote a worker's Σ into the orchestrator's |
 | `migrate` | Move state between schema versions, with a backup |
 | `schema` | Print the embedded schema. `--version N` for an older one |
@@ -80,16 +82,26 @@ A state file older than the binary keeps working, with a warning — only `migra
 
 **Resumability is encouraged, not guaranteed.** The `Stop` hook that checks for a concrete `next_action` is capped at a limited number of consecutive blocks by the client, so it nudges once and yields.
 
-## Layout
+## What `init` puts in your repository
 
 ```text
 .openskillstate/
-└── state.json       # Σ — the only file init writes here
+├── state.json          # Σ
+├── installed.json      # what init added to your config, so uninstall stays clean
+├── worker-state.json   # only under orchestration — ephemeral, never versioned
+└── .integrity          # hash of the last write the CLI made; never versioned
 
 .claude/skills/skstate/    # Claude Code
 .agents/skills/skstate/    # Codex, OpenCode, other agents
 ├── SKILL.md
-└── references/schema.md       # loaded on demand
+└── references/            # loaded on demand
+    ├── schema.md
+    └── orchestration.md
 ```
 
-The schema is not installed. The binary embeds every version it knows and applies the one matching each project's `schema_version`, so a project cannot drift from — or quietly relax — the contract the CLI validates against. `skstate schema` prints it.
+`init` also edits two files you already own, and both edits are reversible:
+
+- **`.claude/settings.json`** — the `deny` rule and the `Stop` and `SessionStart` hooks are **merged** into whatever you already have; nothing is overwritten. Since JSON has no comments to mark an inserted block, `init` records what it added in `installed.json`, which is why that file is versioned rather than ignored: re-running `init` replaces instead of duplicating, and uninstalling does not have to guess.
+- **`CLAUDE.md` and `AGENTS.md`** — a section between `<!-- BEGIN skstate -->` and `<!-- END skstate -->`. Anything you write outside those markers is never touched. With a TTY `init` asks first; without one it requires `--write-instructions` or `--no-write-instructions` and fails if given neither, because a headless install that decides silently is worse than one that stops and says which flag is missing.
+
+The schema is not installed anywhere. The binary embeds every version it knows and applies the one matching each project's `schema_version`, so a project cannot drift from — or quietly relax — the contract the CLI validates against. `skstate schema` prints it.
