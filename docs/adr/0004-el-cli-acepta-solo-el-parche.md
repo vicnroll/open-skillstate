@@ -2,7 +2,7 @@
 status: accepted
 ---
 
-# `skillstate patch` acepta sólo el parche, no el contrato de dos claves del paper
+# `skstate patch` acepta sólo el parche, no el contrato de dos claves del paper
 
 El apéndice A.4 del paper define un contrato de salida de dos claves exactas — `{"state_patch": …, "action": …}` — y el documento de traslado propone «respetarlo literalmente». Se decide **no hacerlo**: el CLI acepta únicamente el parche de estado.
 

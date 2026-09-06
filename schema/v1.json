@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/vicnroll/skill-state-kit/schema/v1",
-  "title": "skillstate execution state",
-  "description": "Sigma: bounded current execution state. Never a transcript, never a chronology. x-tier controls serialization in `skillstate get`; x-promote controls what `skillstate merge` lifts from a worker to the orchestrator.",
+  "$id": "https://github.com/vicnroll/open-skillstate/schema/v1",
+  "title": "OpenSkillState execution state",
+  "description": "Sigma: bounded current execution state. Never a transcript, never a chronology. x-tier controls serialization in `skstate get`; x-promote controls what `skstate merge` lifts from a worker to the orchestrator.",
   "type": "object",
   "additionalProperties": false,
   "required": [

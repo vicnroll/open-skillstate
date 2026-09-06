@@ -2,9 +2,9 @@
 status: accepted
 ---
 
-# El esquema se organiza en niveles y `skillstate get` serializa sólo lo que tiene contenido
+# El esquema se organiza en niveles y `skstate get` serializa sólo lo que tiene contenido
 
-El análisis previo criticaba que el esquema tuviera trece campos, porque Σ viaja en todos los prompts, y proponía amputarlo a los cinco que el paper validó. Esa crítica asume que el fichero *es* lo que llega al prompt, lo cual dejó de ser cierto en cuanto se decidió que un CLI fuera el dueño del esquema (ver [ADR 0001](./0001-cli-como-binario-compilado.md)): `skillstate get` no es un `cat`, es una **función de renderizado**. Se decide separar lo que el esquema *permite* de lo que la serialización *emite*, de modo que un campo raro no cueste nada cuando está vacío y no haga falta elegir entre capacidad y compacidad.
+El análisis previo criticaba que el esquema tuviera trece campos, porque Σ viaja en todos los prompts, y proponía amputarlo a los cinco que el paper validó. Esa crítica asume que el fichero *es* lo que llega al prompt, lo cual dejó de ser cierto en cuanto se decidió que un CLI fuera el dueño del esquema (ver [ADR 0001](./0001-cli-como-binario-compilado.md)): `skstate get` no es un `cat`, es una **función de renderizado**. Se decide separar lo que el esquema *permite* de lo que la serialización *emite*, de modo que un campo raro no cueste nada cuando está vacío y no haga falta elegir entre capacidad y compacidad.
 
 ## Los tres niveles
 
@@ -38,7 +38,7 @@ Dos matices que conviene tener escritos. En **tokens** el ahorro es menor que en
 
 ## Consequences
 
-- **`skillstate get` no devuelve el contenido del fichero.** Es una vista, y quien lo lea esperando un volcado se va a confundir. Por eso existe `skillstate get --raw`, que devuelve `state.json` íntegro para depurar y auditar.
+- **`skstate get` no devuelve el contenido del fichero.** Es una vista, y quien lo lea esperando un volcado se va a confundir. Por eso existe `skstate get --raw`, que devuelve `state.json` íntegro para depurar y auditar.
 - **El coste real que se ataca no es el de tokens.** Un campo vacío ocupa poco; lo caro es que **invita al modelo a rellenarlo** con contenido plausible pero inútil. Ese coste no aparecería en ninguna telemetría de tokens, así que no se podía medir para decidirlo — había que diseñarlo.
 - **La revelación progresiva del skill es la otra mitad del mecanismo.** De poco sirve omitir los campos extendidos de Σ si el `SKILL.md` se los enumera con tres líneas de explicación cada uno en todas las sesiones.
 - **Se puede crecer sin pagar.** Añadir un campo extendido nuevo cuesta cero para quien no lo use, lo que quita presión a la decisión de qué entra en el esquema.

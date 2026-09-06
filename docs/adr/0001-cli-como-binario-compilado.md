@@ -2,7 +2,7 @@
 status: accepted
 ---
 
-# El CLI de skillstate se distribuye como binario compilado, no como script interpretado
+# El CLI de OpenSkillState se distribuye como binario compilado, no como script interpretado
 
 El kit debe adoptarse en repositorios de cualquier stack (Node, Python, .NET, Rust, Go...), así que un script en un lenguaje de aplicación concreto (Python, Node) impondría ese runtime como dependencia dura a repos que no lo usan — la misma asimetría que ya se rechazó para Node, sólo que con otro lenguaje. Se decide compilar el CLI a un binario estático (Go) sin dependencias de runtime, distribuido mediante un instalador universal (`curl | sh`) como canal canónico, más un wrapper npm como canal de conveniencia — elegido por ser el ecosistema más probable hoy entre usuarios de agentes de código — que apunta al mismo binario en lugar de reimplementarlo.
 

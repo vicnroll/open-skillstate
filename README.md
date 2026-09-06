@@ -1,17 +1,17 @@
-# skillstate
+# OpenSkillState
 
 Execution state for coding agents, kept as a validated structured file instead of as conversational history.
 
-Based on *SKILL.state: Scalable Long-Horizon Agent Skills* ([arXiv:2608.26263v3](https://arxiv.org/html/2608.26263v3)).
+An open, opinionated implementation of the **SKILL.state** pattern from *Scalable Long-Horizon Agent Skills* ([arXiv:2608.26263v3](https://arxiv.org/html/2608.26263v3)) — with its own decisions where the paper's model does not fit how coding agents actually work. `skstate` is its CLI.
 
-> **Status: design complete, not implemented.** The architecture is settled and recorded — see [`docs/arquitectura.md`](./docs/arquitectura.md) and the 17 decision records in [`docs/adr/`](./docs/adr/). The binary does not exist yet, so this README documents the design rather than a working install.
+> **Status: design complete, not implemented.** The architecture is settled and recorded — see [`docs/arquitectura.md`](./docs/arquitectura.md) and the 18 decision records in [`docs/adr/`](./docs/adr/). The binary does not exist yet, so this README documents the design rather than a working install.
 
 ## The idea
 
 An agent working a long task accumulates its own transcript, and every step carries all previous steps into the next prompt. That grows quadratically and drags stale reasoning forward. The alternative is to keep an explicit, bounded **execution state** — Σ — and rebuild each step's prompt from the task, that state, and the current observation.
 
 ```text
-conversational                            skillstate
+conversational                          OpenSkillState
 
 step 1  [ P + O₁ ]                        step 1  [ P + Σ₁ + O₁ ]
 step 2  [ P + O₁R₁a₁ + O₂ ]               step 2  [ P + Σ₂ + O₂ ]
@@ -25,7 +25,7 @@ step 3  [ P + O₁R₁a₁ + O₂R₂a₂ + O₃ ]      step 3  [ P + Σ₃ + O�
 The agent **never writes the state file**. A small binary owns the schema, validates every change, applies the merge and writes atomically — so a malformed output cannot corrupt persistent state.
 
 ```bash
-skillstate patch --stdin <<'EOF'
+skstate patch --stdin <<'EOF'
 { "facts": { "auth-in-middleware": "Auth is enforced in middleware/auth.go, not in handlers" } }
 EOF
 ```
@@ -50,7 +50,7 @@ This is where the pattern actually pays off, because a worker launched headlessl
    orchestrator ── consolidated Σ (versioned)
         │
         ├── worktree A ── ephemeral Σ (ignored)  ──┐
-        ├── worktree B ── ephemeral Σ (ignored)  ──┤── skillstate merge
+        ├── worktree B ── ephemeral Σ (ignored)  ──┤── skstate merge
         └── worktree C ── ephemeral Σ (ignored)  ──┘
 ```
 
@@ -68,7 +68,7 @@ Each worker writes only its own Σ, so nothing contends. `merge` **promotes a de
 | `migrate` | Move state between schema versions, with a backup |
 | `schema` | Print the embedded schema. `--version N` for an older one |
 
-`skillstate history` exists too, but it is deliberately absent from `--help` and from the skill: it reads a local store of everything skillstate has recorded, and the agent doing the work must never reach it. Keeping history is compatible with the pattern because O(T²) is a problem of *context*, not of *storage* — what costs tokens is chronology entering the prompt, not chronology existing on disk.
+`skstate history` exists too, but it is deliberately absent from `--help` and from the skill: it reads a local store of everything OpenSkillState has recorded, and the agent doing the work must never reach it. Keeping history is compatible with the pattern because O(T²) is a problem of *context*, not of *storage* — what costs tokens is chronology entering the prompt, not chronology existing on disk.
 
 A state file older than the binary keeps working, with a warning — only `migrate` changes its version, and it always runs on demand. A state file *newer* than the binary is always rejected.
 
@@ -83,13 +83,13 @@ A state file older than the binary keeps working, with a warning — only `migra
 ## Layout
 
 ```text
-.skillstate/
+.openskillstate/
 └── state.json       # Σ — the only file init writes here
 
-.claude/skills/skill-state/    # Claude Code
-.agents/skills/skill-state/    # Codex, OpenCode, other agents
+.claude/skills/skstate/    # Claude Code
+.agents/skills/skstate/    # Codex, OpenCode, other agents
 ├── SKILL.md
 └── references/schema.md       # loaded on demand
 ```
 
-The schema is not installed. The binary embeds every version it knows and applies the one matching each project's `schema_version`, so a project cannot drift from — or quietly relax — the contract the CLI validates against. `skillstate schema` prints it.
+The schema is not installed. The binary embeds every version it knows and applies the one matching each project's `schema_version`, so a project cannot drift from — or quietly relax — the contract the CLI validates against. `skstate schema` prints it.

@@ -4,7 +4,7 @@ status: accepted
 
 # La interfaz base es CLI + skill; la garantía portable es la detección de escritura directa
 
-Fuera de Claude Code no hay regla `deny` ni hooks: el CLI es portable porque cualquier agente ejecuta bash, pero el enforcement no lo es. Eso deja sin garantía a dos de los tres backends que un orquestador como Syntony despacha (Codex y OpenCode). Hacen falta dos decisiones distintas que conviene no mezclar — **cómo habla el modelo con skillstate**, y **qué impide o detecta que se lo salte**.
+Fuera de Claude Code no hay regla `deny` ni hooks: el CLI es portable porque cualquier agente ejecuta bash, pero el enforcement no lo es. Eso deja sin garantía a dos de los tres backends que un orquestador como Syntony despacha (Codex y OpenCode). Hacen falta dos decisiones distintas que conviene no mezclar — **cómo habla el modelo con OpenSkillState**, y **qué impide o detecta que se lo salte**.
 
 ## Interfaz: CLI + skill, con MCP opcional
 

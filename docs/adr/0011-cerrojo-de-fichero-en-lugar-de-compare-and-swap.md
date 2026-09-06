@@ -12,4 +12,4 @@ Y para ese caso el CAS es la herramienta equivocada. El CAS resuelve el patrón 
 
 - **No hace falta `state_version` en Σ**, ni una bandera `--expect-version`, ni un protocolo de reintento que el modelo tenga que implementar correctamente. Ese coste era real y el caso que lo justificaba ya no existe.
 - **Es aditivo.** Si algún día aparece un escritor concurrente de larga duración, el CAS se puede añadir sin romper nada.
-- **No cubre el conflicto semántico**, que es otro problema y ya tiene solución propia: la colisión de clave idéntica con valor distinto la detecta `skillstate merge` y falla de forma ruidosa ([ADR 0006](./0006-merge-promueve-un-subconjunto-y-falla-ruidoso.md)).
+- **No cubre el conflicto semántico**, que es otro problema y ya tiene solución propia: la colisión de clave idéntica con valor distinto la detecta `skstate merge` y falla de forma ruidosa ([ADR 0006](./0006-merge-promueve-un-subconjunto-y-falla-ruidoso.md)).

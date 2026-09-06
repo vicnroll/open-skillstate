@@ -1,8 +1,8 @@
 # Ephemeral worker state under orchestration (ADR 0008)
-.skillstate/worker-state.json
+.openskillstate/worker-state.json
 
 # Integrity record kept outside the state file (ADR 0009)
-.skillstate/.integrity
+.openskillstate/.integrity
 
 .DS_Store
 

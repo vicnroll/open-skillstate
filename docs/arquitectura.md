@@ -1,4 +1,4 @@
-# Arquitectura de skillstate
+# Arquitectura de OpenSkillState
 
 Qué es el sistema, cómo funciona y qué garantiza. Las decisiones individuales y su porqué viven en [`docs/adr/`](./adr/); este documento describe el conjunto coherente que forman.
 
@@ -6,14 +6,14 @@ Qué es el sistema, cómo funciona y qué garantiza. Las decisiones individuales
 |---|---|
 | **Base** | arXiv:2608.26263v3 (Badhe, Tiwari, Chung) |
 | **Estado** | Diseño cerrado, sin implementar |
-| **Decisiones** | 17 ADR en [`docs/adr/`](./adr/) |
+| **Decisiones** | 18 ADR en [`docs/adr/`](./adr/) |
 | **Verificación** | Comportamiento de Claude Code contrastado contra la documentación oficial el 2026-09-05; ver [Estado de verificación](#estado-de-verificación) |
 
 ---
 
 ## Qué es
 
-`skillstate` mantiene el **estado de ejecución** de un agente de código como un dato estructurado y validado en lugar de como historial conversacional acumulado. El agente deja de reescribir el estado a mano y pasa a proponer parches que un runtime determinista valida y aplica.
+`skstate` mantiene el **estado de ejecución** de un agente de código como un dato estructurado y validado en lugar de como historial conversacional acumulado. El agente deja de reescribir el estado a mano y pasa a proponer parches que un runtime determinista valida y aplica.
 
 Se distribuye como un binario compilado sin dependencias de runtime, acompañado de una skill que enseña al agente a usarlo ([ADR 0001](./adr/0001-cli-como-binario-compilado.md), [ADR 0009](./adr/0009-interfaz-y-garantia-portable.md)).
 
@@ -35,7 +35,7 @@ El patrón del paper no es un mecanismo sino dos, con costes y grados de dificul
 Lo que cambia entre un runtime y otro no es el contenido de un paso, sino qué arista alimenta el siguiente:
 
 ```text
-Runtime conversacional                   skillstate
+Runtime conversacional                 OpenSkillState
 
 paso 1  [ P + O₁ ]                       paso 1  [ P + Σ₁ + O₁ ]
 paso 2  [ P + O₁R₁a₁ + O₂ ]              paso 2  [ P + Σ₂ + O₂ ]
@@ -58,7 +58,7 @@ El paper es explícito sobre dónde vive la autoridad: *«schema ownership and v
 El parche se acepta por **stdin**, lo que evita que el modelo tenga que escapar un JSON anidado dentro de una cadena de shell:
 
 ```bash
-skillstate patch --stdin <<'EOF'
+skstate patch --stdin <<'EOF'
 { "facts": { "auth-en-middleware": "Auth se aplica en middleware/auth.go, no en los handlers" } }
 EOF
 ```
@@ -89,13 +89,13 @@ Tres niveles, en lugar de un recorte ([ADR 0003](./adr/0003-esquema-por-niveles-
 | **Extendido** | `hypotheses`, `blockers`, `constraints` | Sólo con contenido |
 | **Meta** | `schema_version`, `project` | Se almacenan pero `get` no los emite |
 
-`skillstate get` **es una función de renderizado, no un `cat`**: omite lo vacío (`null`, `[]`, `{}`, `""`; nunca `0` ni `false`) y emite **JSON compacto en una sola línea**. Un campo raro cuesta cero tokens cuando no se usa, y sobre todo deja de **invitar al modelo a rellenarlo**, que es el coste caro y el que ninguna telemetría capta.
+`skstate get` **es una función de renderizado, no un `cat`**: omite lo vacío (`null`, `[]`, `{}`, `""`; nunca `0` ni `false`) y emite **JSON compacto en una sola línea**. Un campo raro cuesta cero tokens cuando no se usa, y sobre todo deja de **invitar al modelo a rellenarlo**, que es el coste caro y el que ninguna telemetría capta.
 
 El formato se midió antes de elegirlo: sobre el estado real de este repositorio, JSON compacto ahorra un 8,4 % frente a JSON indentado — lo mismo que YAML, pero sin que el modelo tenga que leer una sintaxis y escribir otra. La medición dejó además claro que **el 71 % de Σ son las frases y sólo el 29 % la sintaxis**, así que la palanca sobre su tamaño es escribir entradas concisas, no el formato. El **fichero en disco se queda indentado**, porque está versionado y el diff de un JSON de una línea es inservible; `--pretty` lo indenta por pantalla y `--raw` devuelve el fichero.
 
 `status` es `idle` | `active` | `blocked` | `completed`. `mode` es `execution` | `exploration`, y son ortogonales: `active`+`exploration` es depurar en mitad de una tarea ([ADR 0007](./adr/0007-modo-de-operacion-dentro-del-estado.md)).
 
-El esquema **no se instala en el repositorio**: el binario embebe todas las versiones que conoce y aplica a cada proyecto la que indica su `schema_version` ([ADR 0015](./adr/0015-el-esquema-vive-dentro-del-binario.md)). Una copia por proyecto volvería nominal la propiedad del esquema —bastaría relajarla ahí para que el binario aceptase en ese repositorio lo que rechaza en los demás— y abriría un segundo frente de deriva junto al estado. `skillstate schema` lo imprime para auditarlo o para alimentar un servidor MCP.
+El esquema **no se instala en el repositorio**: el binario embebe todas las versiones que conoce y aplica a cada proyecto la que indica su `schema_version` ([ADR 0015](./adr/0015-el-esquema-vive-dentro-del-binario.md)). Una copia por proyecto volvería nominal la propiedad del esquema —bastaría relajarla ahí para que el binario aceptase en ese repositorio lo que rechaza en los demás— y abriría un segundo frente de deriva junto al estado. `skstate schema` lo imprime para auditarlo o para alimentar un servidor MCP.
 
 ---
 
@@ -105,7 +105,7 @@ La propiedad que el paper pide — *«malformed outputs cannot corrupt persisten
 
 | Nivel | Mecanismo | Dónde |
 |---|---|---|
-| **Prevención** | `deny: ["Edit(./.skillstate/...)"]` impide que el modelo escriba el fichero a mano | Sólo Claude Code |
+| **Prevención** | `deny: ["Edit(./.openskillstate/...)"]` impide que el modelo escriba el fichero a mano | Sólo Claude Code |
 | **Detección** | El CLI guarda fuera del fichero un hash de lo último que escribió; ante un desajuste valida el estado y rechaza sólo si está mal formado | **En todas partes** |
 | **Validación previa** | JSON Schema del *tool input* validado por el cliente | Donde haya servidor MCP |
 
@@ -118,7 +118,7 @@ El modelo de amenaza sigue siendo **un atajo, no un adversario**, y el atajo tí
 ```text
                 ┌── Edit · sed · > fichero ──✗  bloqueado (sólo Claude Code)
    Modelo ──ΔΣ──┤
-                └── skillstate patch ──→ valida esquema
+                └── skstate patch ──→ valida esquema
                                          ⊕ RFC 7386 ──→ estado + hash de integridad
 ```
 
@@ -128,7 +128,7 @@ Rechaza cerrar el turno si `status` sigue en `active` sin un `next_action` concr
 
 ### El hook `SessionStart`
 
-Inyecta el procedimiento y la salida de `skillstate get` **por stdout con código 0**, que es la vía documentada. Convierte la reanudación en sesión nueva de instrucción a mecanismo: la sesión empieza literalmente siendo (P, Σ).
+Inyecta el procedimiento y la salida de `skstate get` **por stdout con código 0**, que es la vía documentada. Convierte la reanudación en sesión nueva de instrucción a mecanismo: la sesión empieza literalmente siendo (P, Σ).
 
 ---
 
@@ -140,7 +140,7 @@ Un orquestador como [Syntony](https://github.com/vicnroll/syntony) despacha vari
    Orquestador ── Σ consolidado (versionado en Git)
         │
         ├── worktree A ── Σ efímero (ignorado)  ──┐
-        ├── worktree B ── Σ efímero (ignorado)  ──┤── skillstate merge ──> promoción
+        ├── worktree B ── Σ efímero (ignorado)  ──┤── skstate merge ──> promoción
         └── worktree C ── Σ efímero (ignorado)  ──┘
 ```
 
@@ -166,7 +166,7 @@ Un orquestador como [Syntony](https://github.com/vicnroll/syntony) despacha vari
 | `migrate` | Migra el estado entre versiones de esquema, con copia de seguridad |
 | `schema` | Imprime el esquema embebido. `--version N` para uno anterior |
 
-Hay además dos puntos de entrada que no son superficie de usuario. `history` es el del agente analista, oculto de `--help` y descrito en el [ADR 0017](./adr/0017-historico-local-inalcanzable-desde-el-agente.md). Y `hook` no lo escribe nadie: Es por donde el cliente invoca al binario cuando dispara un evento, `skillstate hook stop` y `skillstate hook session-start`. Apunta al binario y no a un script para no reintroducir la dependencia de runtime que el [ADR 0001](./adr/0001-cli-como-binario-compilado.md) rechazó, ni un segundo sitio donde viva conocimiento del esquema ([ADR 0012](./adr/0012-init-completa-la-instalacion.md)).
+Hay además dos puntos de entrada que no son superficie de usuario. `history` es el del agente analista, oculto de `--help` y descrito en el [ADR 0017](./adr/0017-historico-local-inalcanzable-desde-el-agente.md). Y `hook` no lo escribe nadie: Es por donde el cliente invoca al binario cuando dispara un evento, `skstate hook stop` y `skstate hook session-start`. Apunta al binario y no a un script para no reintroducir la dependencia de runtime que el [ADR 0001](./adr/0001-cli-como-binario-compilado.md) rechazó, ni un segundo sitio donde viva conocimiento del esquema ([ADR 0012](./adr/0012-init-completa-la-instalacion.md)).
 
 `init` **completa la instalación**, incluida la sección en `CLAUDE.md`/`AGENTS.md` dentro de un bloque delimitado e idempotente ([ADR 0012](./adr/0012-init-completa-la-instalacion.md)). Con TTY pregunta; sin TTY exige `--write-instructions` o `--no-write-instructions` y falla si no recibe ninguna, porque un `init` headless que decide en silencio es peor que uno que se detiene diciendo qué falta.
 
@@ -181,11 +181,11 @@ Se mide **el estado, no los tokens** ([ADR 0010](./adr/0010-se-instrumenta-el-es
 Todo eso, y además los pasos, decisiones y acciones, se guardan en un **almacén local en SQLite fuera del repositorio** ([ADR 0017](./adr/0017-historico-local-inalcanzable-desde-el-agente.md)). Fuera del repositorio porque las preguntas que justifican medir se contestan **cruzando proyectos**, y un registro por repositorio no las responde. El proyecto se identifica por el campo `project`, no por su ruta, así que mudar el repositorio no parte la serie.
 
 ```text
-   skillstate  ──escribe──▶  histórico local  ◀──lee──  skillstate history
+   skstate     ──escribe──▶  histórico local  ◀──lee──  skstate history
    (el agente lo usa)         (SQLite, WAL)             (oculto; agente analista)
 ```
 
-**El agente que trabaja no puede alcanzarlo.** Ningún comando de `skillstate` devuelve datos del histórico — ni resumidos, ni como contexto — y ni el skill ni `--help` lo mencionan. Guardar cronología no contradice el patrón porque el O(T²) es un problema de *contexto*, no de *almacenamiento*: lo que hace daño es que la cronología **entre en el prompt**. La skill del agente analista se instala aparte y en otro ámbito, nunca en el repositorio del proyecto, porque una skill vecina que ofrezca «todo lo registrado» se invocaría sola justo cuando el agente creyera necesitar contexto previo.
+**El agente que trabaja no puede alcanzarlo.** Ningún comando de `skstate` devuelve datos del histórico — ni resumidos, ni como contexto — y ni el skill ni `--help` lo mencionan. Guardar cronología no contradice el patrón porque el O(T²) es un problema de *contexto*, no de *almacenamiento*: lo que hace daño es que la cronología **entre en el prompt**. La skill del agente analista se instala aparte y en otro ámbito, nunca en el repositorio del proyecto, porque una skill vecina que ofrezca «todo lo registrado» se invocaría sola justo cuando el agente creyera necesitar contexto previo.
 
 El precio, dicho sin adornos: el almacén contiene **contenido del proyecto**, no sólo recuentos, y sobrevive a borrar el repositorio. Por eso `history purge` es parte del diseño y no un extra, y por eso exportar métricas y exportar contenido tendrán que ser caminos distintos cuando llegue OTLP.
 
@@ -248,4 +248,4 @@ Consultadas y verificadas el 2026-09-05. Las de Claude Code se citan separando *
    <https://datatracker.ietf.org/doc/html/rfc7386>
 
 7. **SKILL.state: O(T) Agent Memory — Codex CLI** — Daniel Vaughan. Análisis previo del mismo traslado; origen de la receta `PostToolUse` que no aplica en Claude Code.
-   <https://codex.danielvaughan.com/2026/08/29/skill-state-ot-agent-memory-structured-execution-state-codex-cli-long-horizon/>
+   <https://codex.danielvaughan.com/2026/08/29/skstate-ot-agent-memory-structured-execution-state-codex-cli-long-horizon/>

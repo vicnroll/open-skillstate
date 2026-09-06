@@ -2,7 +2,7 @@
 status: accepted
 ---
 
-# `skillstate merge` promueve un subconjunto declarado y falla de forma ruidosa ante conflicto
+# `skstate merge` promueve un subconjunto declarado y falla de forma ruidosa ante conflicto
 
 La jerarquía de [ADR 0005](./0005-estado-jerarquico-bajo-orquestacion.md) obliga a consolidar los Σ de los workers al integrar sus worktrees. Se decide que esa operación **no es una unión de dos Σ, sino la promoción de un subconjunto declarado en el esquema**, y que cualquier colisión residual detiene la operación en vez de resolverse sola.
 

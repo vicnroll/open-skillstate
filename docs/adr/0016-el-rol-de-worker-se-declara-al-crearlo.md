@@ -6,17 +6,17 @@ status: accepted
 
 La topología del [ADR 0005](./0005-estado-jerarquico-bajo-orquestacion.md) pone dos Σ en juego, y el [ADR 0008](./0008-politica-de-git-para-el-estado.md) los obliga a tener nombres distintos — `state.json` versionado, `worker-state.json` efímero — porque los worktrees comparten el `.gitignore` del repositorio. Faltaba lo operativo: **cómo sabe el binario sobre cuál de los dos opera**. Equivocarse tiene el peor modo de fallo del diseño: un worker escribiendo sobre el estado versionado reintroduce en silencio el conflicto entre Git y la fusión semántica que el ADR 0008 existe para evitar, y no se descubre hasta integrar.
 
-Se decide que el rol se declare **una vez, al crear el worker**, con `skillstate init --worker` en su worktree. A partir de ahí no hay nada que recordar: **si existe `worker-state.json`, se opera sobre él**; si sólo existe `state.json`, se opera sobre ese. La instrucción vive en el cuerpo del `SKILL.md` apuntando a `references/orchestration.md`, siguiendo la revelación progresiva del [ADR 0003](./0003-esquema-por-niveles-y-serializacion-dinamica.md).
+Se decide que el rol se declare **una vez, al crear el worker**, con `skstate init --worker` en su worktree. A partir de ahí no hay nada que recordar: **si existe `worker-state.json`, se opera sobre él**; si sólo existe `state.json`, se opera sobre ese. La instrucción vive en el cuerpo del `SKILL.md` apuntando a `references/orchestration.md`, siguiendo la revelación progresiva del [ADR 0003](./0003-esquema-por-niveles-y-serializacion-dinamica.md).
 
 ## Por qué no una variable de entorno
 
-Era la propuesta más limpia en apariencia: el orquestador lanza `SKILLSTATE_ROLE=worker claude -p …` y todo `skillstate` que se ejecute dentro lo hereda sin que el modelo sepa que existe. Pero convierte la corrección de skillstate en **algo que cada orquestador tiene que implementar**, y eso es el mismo error que el [ADR 0009](./0009-interfaz-y-garantia-portable.md) ya rechazó al descartar la prevención vía `deny` como garantía portable: una propiedad que depende de que el entorno coopere no es una propiedad, es una esperanza.
+Era la propuesta más limpia en apariencia: el orquestador lanza `SKSTATE_ROLE=worker claude -p …` y todo `skstate` que se ejecute dentro lo hereda sin que el modelo sepa que existe. Pero convierte la corrección de OpenSkillState en **algo que cada orquestador tiene que implementar**, y eso es el mismo error que el [ADR 0009](./0009-interfaz-y-garantia-portable.md) ya rechazó al descartar la prevención vía `deny` como garantía portable: una propiedad que depende de que el entorno coopere no es una propiedad, es una esperanza.
 
-El coste es concreto y comprobable. Orca orquesta con worktrees y no conoce skillstate. Syntony habría que modificarlo. Cualquier orquestador futuro, igual. Y mientras no lo hagan, el comportamiento es incorrecto sin avisar. Un kit que aspira a ser agnóstico del orquestador no puede pedirle al orquestador que lo conozca.
+El coste es concreto y comprobable. Orca orquesta con worktrees y no conoce OpenSkillState. Syntony habría que modificarlo. Cualquier orquestador futuro, igual. Y mientras no lo hagan, el comportamiento es incorrecto sin avisar. Un kit que aspira a ser agnóstico del orquestador no puede pedirle al orquestador que lo conozca.
 
 ## Por qué tampoco un flag en cada llamada
 
-La alternativa era enseñar en el skill que todo `skillstate patch` dentro de un worker lleve `--worker`. Se descartó por la **forma de la obligación**, no por desconfianza en el modelo:
+La alternativa era enseñar en el skill que todo `skstate patch` dentro de un worker lleve `--worker`. Se descartó por la **forma de la obligación**, no por desconfianza en el modelo:
 
 | | Cuándo dispara | Qué compite con ella |
 |---|---|---|

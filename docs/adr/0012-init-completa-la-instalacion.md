@@ -2,9 +2,9 @@
 status: accepted
 ---
 
-# `skillstate init` completa la instalación, incluida la edición de los ficheros de instrucciones
+# `skstate init` completa la instalación, incluida la edición de los ficheros de instrucciones
 
-Un `init` que termina diciendo «instalación completada» y deja al usuario un paso manual pendiente está roto: nadie lee el aviso, y el kit queda a medias sin que nada lo indique. No existen apenas herramientas que se instalen y luego pidan que añadas algo a mano. Se decide que `init` **complete la instalación**, detectando el entorno y generando lo que corresponda — `.skillstate/`, la skill en las rutas nativas de cada cliente presente, la entrada de `.gitignore`, y la configuración de permisos y hooks donde apliquen — **incluida la sección en `CLAUDE.md` y `AGENTS.md`**.
+Un `init` que termina diciendo «instalación completada» y deja al usuario un paso manual pendiente está roto: nadie lee el aviso, y el kit queda a medias sin que nada lo indique. No existen apenas herramientas que se instalen y luego pidan que añadas algo a mano. Se decide que `init` **complete la instalación**, detectando el entorno y generando lo que corresponda — `.openskillstate/`, la skill en las rutas nativas de cada cliente presente, la entrada de `.gitignore`, y la configuración de permisos y hooks donde apliquen — **incluida la sección en `CLAUDE.md` y `AGENTS.md`**.
 
 ## Dos rutas de skill, no una por cliente
 
@@ -14,7 +14,7 @@ El criterio general es instalar en la convención compartida siempre, y añadir 
 
 ## Los hooks apuntan al binario, no a scripts
 
-La configuración de hooks que `init` escribe apunta al propio binario — `skillstate hook stop`, `skillstate hook session-start` — y no a un script empaquetado en el repositorio.
+La configuración de hooks que `init` escribe apunta al propio binario — `skstate hook stop`, `skstate hook session-start` — y no a un script empaquetado en el repositorio.
 
 El motivo es el mismo que sostiene el [ADR 0001](./0001-cli-como-binario-compilado.md). Un script de hook tendría que leer el estado para decidir si bloquea, y para eso necesita `jq`, `python` o parsear JSON en bash: reintroduce por la puerta de atrás la dependencia de runtime que se rechazó para el CLI, y en repositorios de cualquier stack. Además pondría conocimiento del esquema en un segundo sitio, capaz de desincronizarse del binario sin que nada lo detecte — que es exactamente la razón por la que el esquema no se copia al repositorio ([ADR 0015](./0015-el-esquema-vive-dentro-del-binario.md)).
 
@@ -29,7 +29,7 @@ Editar ficheros que el usuario ha escrito exige permiso, pero pedirlo por consol
 
 ## Edición delimitada
 
-La sección se escribe entre marcas `<!-- BEGIN skillstate -->` y `<!-- END skillstate -->`. Eso la hace **idempotente** — reejecutar `init` sustituye el bloque en vez de duplicarlo — y **reversible**, porque se puede retirar sin tocar el resto del fichero. El contenido que el usuario haya escrito fuera del bloque no se altera nunca.
+La sección se escribe entre marcas `<!-- BEGIN skstate -->` y `<!-- END skstate -->`. Eso la hace **idempotente** — reejecutar `init` sustituye el bloque en vez de duplicarlo — y **reversible**, porque se puede retirar sin tocar el resto del fichero. El contenido que el usuario haya escrito fuera del bloque no se altera nunca.
 
 ## Consequences
 

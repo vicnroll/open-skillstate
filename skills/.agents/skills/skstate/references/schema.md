@@ -1,13 +1,13 @@
 # Extended fields
 
-These fields validate like any other, but they do not appear in `skillstate get` output until they have content. Use them when they apply; leaving them empty costs nothing.
+These fields validate like any other, but they do not appear in `skstate get` output until they have content. Use them when they apply; leaving them empty costs nothing.
 
 ## `hypotheses`
 
 Only hypotheses still operationally useful — ones that would otherwise get re-tested. Each entry is an object:
 
 ```bash
-skillstate patch --stdin <<'EOF'
+skstate patch --stdin <<'EOF'
 {
   "hypotheses": {
     "version-outside-critical-section": {
@@ -22,7 +22,7 @@ EOF
 `status` is `open`, `confirmed` or `rejected`. Delete a hypothesis once it no longer prevents repeated work:
 
 ```bash
-skillstate patch --stdin <<'EOF'
+skstate patch --stdin <<'EOF'
 { "hypotheses": { "version-outside-critical-section": null } }
 EOF
 ```
@@ -34,7 +34,7 @@ Most useful in `mode: exploration`, where the point of the work is narrowing dow
 Only unresolved conditions actually preventing progress — an external dependency, a missing credential, a decision only the user can make. Delete each one the moment it clears; a stale blocker is worse than none, because it makes a fresh session believe work is stuck when it is not.
 
 ```bash
-skillstate patch --stdin <<'EOF'
+skstate patch --stdin <<'EOF'
 { "blockers": { "staging-db-unreachable": "Staging DB refuses connections since the 14:00 deploy" } }
 EOF
 ```
@@ -46,7 +46,7 @@ EOF
 Requirements that shape later decisions and are not visible in the code: compatibility guarantees, explicit non-goals, deadlines, or something the user ruled out.
 
 ```bash
-skillstate patch --stdin <<'EOF'
+skstate patch --stdin <<'EOF'
 {
   "constraints": {
     "public-api-stays-compatible": "The public API must not break for 2.x consumers",

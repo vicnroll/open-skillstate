@@ -12,7 +12,7 @@ La sección 7 del paper reconoce tres escenarios donde su premisa falla: cuando 
 
 ## Por qué dentro de Σ y no en configuración
 
-Un interruptor en `.skillstate/config.json` o en una variable de entorno resolvería lo mismo, pero quedaría invisible desde el estado: una sesión fresca no sabría en qué régimen opera, y en la práctica lo que se apaga se queda apagado. Dentro de Σ el modo viaja en todos los prompts, lo hereda cualquier sesión que reanude, el hook lo lee sin consultar configuración externa, y **cambiar de modo es un parche auditable** como cualquier otro.
+Un interruptor en `.openskillstate/config.json` o en una variable de entorno resolvería lo mismo, pero quedaría invisible desde el estado: una sesión fresca no sabría en qué régimen opera, y en la práctica lo que se apaga se queda apagado. Dentro de Σ el modo viaja en todos los prompts, lo hereda cualquier sesión que reanude, el hook lo lee sin consultar configuración externa, y **cambiar de modo es un parche auditable** como cualquier otro.
 
 ## Consequences
 
