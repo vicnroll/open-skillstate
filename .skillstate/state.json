@@ -7,7 +7,7 @@
 
   "facts": {
     "diseno-cerrado-sin-implementar": "El diseño está cerrado y documentado, pero el binario no existe: no hay ningún .go, package.json ni ejecutable en el repositorio",
-    "decisiones-en-adr": "Las 15 decisiones de diseño y su porqué viven en docs/adr/0001 a 0015; docs/arquitectura.md describe el conjunto y CONTEXT.md fija el vocabulario. No reargumentar lo que ya está ahí",
+    "decisiones-en-adr": "Las 16 decisiones de diseño y su porqué viven en docs/adr/0001 a 0016; docs/arquitectura.md describe el conjunto y CONTEXT.md fija el vocabulario. No reargumentar lo que ya está ahí",
     "prototipo-no-normativo": "El prototipo anterior (sólo texto, basado en la v2 del paper) está superado y fuera del árbol de trabajo: sólo existe como el commit inicial 4d7b571. No restaurarlo ni alinearse con lo que prometían su README ni su procedure.md",
     "idioma-por-artefacto": "Artefactos distribuibles en inglés (SKILL.md, README.md, schema.json, instructions-fragment.md); artefactos de diseño en español (arquitectura.md, ADR, CONTEXT.md)",
     "syntony-es-el-runtime": "Syntony (github.com/vicnroll/syntony, privado, Go, pre-alpha) es el orquestador headless que despacha workers vía codex exec, claude -p y opencode serve. Es el caso de uso fuerte del patrón y comparte lenguaje con este CLI",

@@ -14,6 +14,23 @@ El análisis previo criticaba que el esquema tuviera trece campos, porque Σ via
 
 La regla que separa los dos primeros niveles del tercero: **omitir lo raro, cortar lo redundante.**
 
+## Qué formato emite
+
+**JSON compacto, en una sola línea.** El almacenamiento tiene que ser JSON porque RFC 7386 opera sobre JSON, pero el renderizado era una elección libre y se midió antes de tomarla, sobre el estado real de este repositorio y con los campos vacíos ya filtrados:
+
+| Formato | Bytes | Frente a `indent=2` |
+|---|---|---|
+| JSON `indent=2` | 3.507 | — |
+| YAML | 3.209 | −8,5 % |
+| Markdown | 3.302 | −5,8 % |
+| **JSON compacto** | **3.211** | **−8,4 %** |
+
+JSON compacto ahorra **lo mismo que YAML sin ninguna de sus contrapartidas**: el modelo lee la misma sintaxis que escribe, de modo que el slug que ve en `facts` es literalmente la cadena que teclea en el parche, y no hay reglas de citado que se comporten distinto según el contenido del valor. La medición además reencuadra el problema: **el 71 % de Σ son las frases y sólo el 29 % es sintaxis**, así que ningún formato mueve mucho la aguja y la palanca real sobre el tamaño es escribir entradas concisas.
+
+Dos matices que conviene tener escritos. En **tokens** el ahorro es menor que en bytes, quizá la mitad, porque los tokenizadores fusionan las rachas de espacio en blanco y una sangría entera suele costar un solo token. Y un blob de una línea enseña la forma del estado algo peor que uno indentado, que es parte de por qué el núcleo se serializa siempre; se asume, porque los modelos leen JSON minificado sin dificultad.
+
+**El fichero en disco se queda indentado.** El Σ del orquestador está versionado ([ADR 0008](./0008-politica-de-git-para-el-estado.md)) y el diff de un JSON de una sola línea es inservible. Compacto es el renderizado, indentado es el almacenamiento — que es exactamente lo que significa que `get` no sea un `cat`. `--pretty` lo indenta para quien lo lea por pantalla.
+
 ## Qué cuenta como vacío
 
 `null`, `[]`, `{}` y `""` se omiten. `0` y `false` **no**: son valores legítimos, no ausencias. La regla se fija aquí explícitamente para que no dependa del criterio de quien implemente el serializador.

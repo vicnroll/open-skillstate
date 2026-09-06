@@ -4,7 +4,7 @@ Execution state for coding agents, kept as a validated structured file instead o
 
 Based on *SKILL.state: Scalable Long-Horizon Agent Skills* ([arXiv:2608.26263v3](https://arxiv.org/html/2608.26263v3)).
 
-> **Status: design complete, not implemented.** The architecture is settled and recorded — see [`docs/arquitectura.md`](./docs/arquitectura.md) and the 15 decision records in [`docs/adr/`](./docs/adr/). The binary does not exist yet, so this README documents the design rather than a working install.
+> **Status: design complete, not implemented.** The architecture is settled and recorded — see [`docs/arquitectura.md`](./docs/arquitectura.md) and the 16 decision records in [`docs/adr/`](./docs/adr/). The binary does not exist yet, so this README documents the design rather than a working install.
 
 ## The idea
 
@@ -37,10 +37,10 @@ Patches are [RFC 7386 JSON Merge Patch](https://datatracker.ietf.org/doc/html/rf
 | Level | Mechanism | Where |
 |---|---|---|
 | Prevention | A `deny` permission rule stops the model editing the file by hand | Claude Code only |
-| Detection | The CLI keeps an integrity hash outside the file and compares on every operation | Everywhere |
+| Detection | The CLI keeps an integrity hash outside the file; on a mismatch it validates the state and refuses only if it is malformed | Everywhere |
 | Input validation | JSON Schema on the tool input, checked by the client | Where an MCP server is configured |
 
-Enforcement is not portable — permission rules and hooks are client-specific. Detection is, so a direct write is always at least *loud*, even where it cannot be blocked. The threat model is a model taking a shortcut, not an adversary.
+Enforcement is not portable — permission rules and hooks are client-specific. Detection is, but it catches **corruption rather than shortcuts**: the orchestrator's Σ is versioned, so `git pull` and `git checkout` rewrite it legitimately without going through the CLI, and treating every mismatch as an alarm would train everyone to ignore it. A hand-edit that leaves the file well-formed goes unnoticed; one that does not is refused. The threat model is a model taking a shortcut, not an adversary — and that shortcut usually leaves the file malformed, precisely because nothing validated it on the way in.
 
 ## Under orchestration
 
@@ -60,7 +60,7 @@ Each worker writes only its own Σ, so nothing contends. `merge` **promotes a de
 
 | Command | |
 |---|---|
-| `get` | Render Σ, omitting empty fields. `--raw` dumps the file |
+| `get` | Render Σ as compact JSON, omitting empty fields. `--pretty` indents, `--raw` dumps the file |
 | `patch` | Apply an RFC 7386 patch from stdin |
 | `check` | Validate, detect schema drift and direct writes |
 | `init` | Install into a repository |

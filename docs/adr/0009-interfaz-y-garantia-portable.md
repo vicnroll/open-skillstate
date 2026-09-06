@@ -14,9 +14,20 @@ Un servidor MCP añadiría validación del *tool input* contra JSON Schema por p
 
 ## Garantía: detección, no prevención
 
-El CLI guarda fuera del fichero un hash de lo último que él escribió y lo compara en cada operación. Si `state.json` cambió sin pasar por el CLI, la siguiente llamada lo detecta. No impide el bypass, pero lo vuelve **ruidoso en todos los clientes por igual**, sin depender de nada que el cliente ofrezca.
+El CLI guarda fuera del fichero un hash de lo último que él escribió y lo compara en cada operación. Si `state.json` cambió sin pasar por el CLI, la siguiente llamada lo detecta. No impide el bypass, pero lo vuelve visible **en todos los clientes por igual**, sin depender de nada que el cliente ofrezca.
 
-Es suficiente porque el modelo de amenaza no es un adversario, es **un modelo tomando un atajo**. Contra un adversario la detección no serviría — también podría actualizar el registro de integridad —; contra un atajo sirve, porque el atajo se toma justamente cuando se supone que nadie mira.
+### Qué detecta de verdad: corrupción, no atajos
+
+La formulación inicial de esta garantía era más ambiciosa y **era incorrecta**. Decía que un desajuste de hash delata a un modelo que ha editado el fichero a mano. No lo delata, porque el Σ del orquestador **está versionado en Git** ([ADR 0008](./0008-politica-de-git-para-el-estado.md)) y eso significa que `git pull`, `git checkout`, un rebase, un merge o un `stash pop` **reescriben `state.json` legítimamente sin pasar por el CLI**. En un repositorio con más de una rama, el desajuste no es la excepción: es rutina. Y una alarma que salta a diario por motivos legítimos deja de ser una señal — se aprende a ignorarla, que es la forma más segura de inutilizar la única garantía portable del diseño.
+
+Se decide **graduar la respuesta por validez** en lugar de por procedencia. Ante un desajuste, el CLI valida el estado contra el esquema:
+
+- **Valida** → el cambio externo estaba bien formado. Se avisa y se restablece la línea base.
+- **No valida** → se rechaza, y `check` dice qué está mal.
+
+La consecuencia hay que decirla sin adornos: **un modelo que edite el fichero a mano y lo deje bien formado pasa desapercibido.** Es menos de lo que esta garantía prometía. Pero la promesa era la que estaba mal, no el mecanismo: en un fichero versionado no hay forma de distinguir un atajo de un `git pull` sin acoplar el CLI a Git, y guardar el `HEAD` junto al hash tampoco lo consigue — un atajo con un commit por medio se atribuiría a Git y quedaría igual de invisible. Vale más recortar lo que se promete que mantener escrita una garantía que no se cumple.
+
+Lo que sí queda intacto es el modelo de amenaza: **no es un adversario, es un modelo tomando un atajo**, y el atajo típico deja el fichero mal formado precisamente porque nadie lo validó al escribirlo. La prevención real sigue estando donde siempre estuvo: en la regla `deny`, sólo en Claude Code.
 
 ## Consequences
 

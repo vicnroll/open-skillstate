@@ -6,7 +6,7 @@ Qué es el sistema, cómo funciona y qué garantiza. Las decisiones individuales
 |---|---|
 | **Base** | arXiv:2608.26263v3 (Badhe, Tiwari, Chung) |
 | **Estado** | Diseño cerrado, sin implementar |
-| **Decisiones** | 15 ADR en [`docs/adr/`](./adr/) |
+| **Decisiones** | 16 ADR en [`docs/adr/`](./adr/) |
 | **Verificación** | Comportamiento de Claude Code contrastado contra la documentación oficial el 2026-09-05; ver [Estado de verificación](#estado-de-verificación) |
 
 ---
@@ -89,7 +89,9 @@ Tres niveles, en lugar de un recorte ([ADR 0003](./adr/0003-esquema-por-niveles-
 | **Extendido** | `hypotheses`, `blockers`, `constraints` | Sólo con contenido |
 | **Metadatos** | `schema_version` | No cuenta como contenido |
 
-`skillstate get` **es una función de renderizado, no un `cat`**: omite lo vacío (`null`, `[]`, `{}`, `""`; nunca `0` ni `false`). Un campo raro cuesta cero tokens cuando no se usa, y sobre todo deja de **invitar al modelo a rellenarlo**, que es el coste caro y el que ninguna telemetría capta. `skillstate get --raw` devuelve el fichero íntegro para depurar.
+`skillstate get` **es una función de renderizado, no un `cat`**: omite lo vacío (`null`, `[]`, `{}`, `""`; nunca `0` ni `false`) y emite **JSON compacto en una sola línea**. Un campo raro cuesta cero tokens cuando no se usa, y sobre todo deja de **invitar al modelo a rellenarlo**, que es el coste caro y el que ninguna telemetría capta.
+
+El formato se midió antes de elegirlo: sobre el estado real de este repositorio, JSON compacto ahorra un 8,4 % frente a JSON indentado — lo mismo que YAML, pero sin que el modelo tenga que leer una sintaxis y escribir otra. La medición dejó además claro que **el 71 % de Σ son las frases y sólo el 29 % la sintaxis**, así que la palanca sobre su tamaño es escribir entradas concisas, no el formato. El **fichero en disco se queda indentado**, porque está versionado y el diff de un JSON de una línea es inservible; `--pretty` lo indenta por pantalla y `--raw` devuelve el fichero.
 
 `status` es `idle` | `active` | `blocked` | `completed`. `mode` es `execution` | `exploration`, y son ortogonales: `active`+`exploration` es depurar en mitad de una tarea ([ADR 0007](./adr/0007-modo-de-operacion-dentro-del-estado.md)).
 
@@ -104,12 +106,14 @@ La propiedad que el paper pide — *«malformed outputs cannot corrupt persisten
 | Nivel | Mecanismo | Dónde |
 |---|---|---|
 | **Prevención** | `deny: ["Edit(./.skillstate/...)"]` impide que el modelo escriba el fichero a mano | Sólo Claude Code |
-| **Detección** | El CLI guarda fuera del fichero un hash de lo último que escribió y lo compara en cada operación | **En todas partes** |
+| **Detección** | El CLI guarda fuera del fichero un hash de lo último que escribió; ante un desajuste valida el estado y rechaza sólo si está mal formado | **En todas partes** |
 | **Validación previa** | JSON Schema del *tool input* validado por el cliente | Donde haya servidor MCP |
 
 La prevención se apoya en una asimetría que la documentación de permisos afirma literalmente: las reglas `deny` alcanzan las herramientas integradas, los comandos bash reconocidos y los destinos de redirecciones, pero **no los subprocesos arbitrarios** — que es exactamente lo que el CLI es.
 
-La detección basta porque **el modelo de amenaza no es un adversario, es un atajo**. Contra un adversario no serviría; contra un atajo sí, porque el atajo se toma justo cuando se supone que nadie mira. Cubre además un agujero que abre la propia skill: un script empaquetado en `scripts/` es un subproceso arbitrario y `deny` no lo alcanza.
+La detección **detecta corrupción, no atajos**, y conviene decirlo así ([ADR 0009](./adr/0009-interfaz-y-garantia-portable.md)). El Σ del orquestador está versionado, de modo que `git pull`, `git checkout` o un rebase reescriben el fichero legítimamente sin pasar por el CLI: si cada desajuste fuese una alarma, la alarma sonaría a diario por motivos correctos y se aprendería a ignorarla. Por eso la respuesta se gradúa por validez — si el estado valida contra el esquema se avisa y se restablece la línea base; si no valida, se rechaza.
+
+El modelo de amenaza sigue siendo **un atajo, no un adversario**, y el atajo típico deja el fichero mal formado justamente porque nadie lo validó al escribirlo. Pero un modelo que edite a mano y lo deje bien formado pasa desapercibido: la prevención real vive sólo en la regla `deny`. Esta capa cubre además un agujero que abre la propia skill, porque un script empaquetado en `scripts/` es un subproceso arbitrario que `deny` no alcanza.
 
 ```text
                 ┌── Edit · sed · > fichero ──✗  bloqueado (sólo Claude Code)
@@ -154,7 +158,7 @@ Un orquestador como [Syntony](https://github.com/vicnroll/syntony) despacha vari
 
 | Comando | Qué hace |
 |---|---|
-| `get` | Renderiza Σ omitiendo lo vacío. `--raw` devuelve el fichero íntegro |
+| `get` | Renderiza Σ en JSON compacto omitiendo lo vacío. `--pretty` lo indenta, `--raw` devuelve el fichero |
 | `patch` | Aplica un parche RFC 7386 por stdin, validando contra el esquema |
 | `check` | Valida el estado, detecta desajuste de `schema_version` y escritura directa |
 | `init` | Instala el kit en el repositorio |
