@@ -1,0 +1,27 @@
+{
+  "_comment": "What `skstate init` merges into .claude/settings.json. It never overwrites: existing deny rules and hooks are kept, these are added alongside. What was inserted is recorded in .openskillstate/installed.json so that re-running init replaces instead of duplicating, and uninstall knows what to remove (ADR 0012). Verify the hook object shape against the Claude Code hooks reference before shipping; the deny syntax and its reach over bash and redirections are confirmed, arbitrary subprocesses are deliberately not covered (ADR 0009).",
+
+  "permissions": {
+    "deny": [
+      "Edit(./.openskillstate/**)",
+      "Write(./.openskillstate/**)"
+    ]
+  },
+
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          { "type": "command", "command": "skstate hook session-start" }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          { "type": "command", "command": "skstate hook stop" }
+        ]
+      }
+    ]
+  }
+}

@@ -24,7 +24,7 @@ Never write `skillstate`: that is a different product, already published on npm 
 | `docs/arquitectura.md` | What the system is and how it works, as a whole |
 | `docs/adr/` | The 18 design decisions and why each was made |
 | `CONTEXT.md` | Project vocabulary. Check terms here before inventing new ones |
-| `skills/` | The payload `init` will install: skill, initial state, instruction fragment |
+| `skills/` | The payload `init` will install: skill + references, initial state, instruction fragment, settings fragment |
 | `schema/` | The schema versions the binary embeds. Source, not payload — never installed |
 | `.openskillstate/state.json` | Working state for the design effort itself |
 

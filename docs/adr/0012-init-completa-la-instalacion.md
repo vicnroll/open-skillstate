@@ -20,6 +20,16 @@ El motivo es el mismo que sostiene el [ADR 0001](./0001-cli-como-binario-compila
 
 `hook` no forma parte de la superficie de usuario: nadie lo escribe nunca. Es el punto de entrada por el que el cliente invoca al binario, y por eso no aparece en la tabla de comandos.
 
+## La configuración de permisos y hooks se fusiona, y se lleva la cuenta aparte
+
+`init` tiene que escribir la regla `deny` y los hooks en `.claude/settings.json`, un fichero que el usuario ya puede tener con sus propios permisos y hooks. Se fusiona, nunca se sobrescribe: si ya tiene un hook `Stop`, el suyo y el nuestro conviven; si ya tiene reglas `deny`, la nuestra se añade a la lista.
+
+El problema es que **JSON no admite el truco que resolvió `CLAUDE.md`**. Allí bastó un bloque delimitado por comentarios para que la edición fuera idempotente y reversible, pero JSON no tiene comentarios y no hay forma de marcar «esto lo puse yo» dentro del propio fichero. Se decide que `init` guarde en `.openskillstate/installed.json` **un registro de qué insertó**, de modo que reejecutarlo sustituya en vez de duplicar y que el camino inverso sepa qué quitar sin adivinar.
+
+Se descartó **detectar por contenido** al desinstalar — buscar las entradas que coincidan con lo que se instalaría hoy — porque falla justo cuando importa: si el usuario retoca ligeramente la regla, o si una versión posterior cambia lo que instala, la detección no la reconoce y deja basura para siempre. Es la misma clase de fallo silencioso por la que el [ADR 0008](./0008-politica-de-git-para-el-estado.md) rechazó el *merge driver* de Git.
+
+Va en `settings.json` y no en `settings.local.json` porque la regla y los hooks son **disciplina del proyecto**, no preferencia de una persona: instalarlos en un repositorio sirve para que los tenga todo el equipo. Por eso el registro se versiona con él — si sólo lo tuviera quien ejecutó `init`, nadie más podría desinstalar limpiamente.
+
 ## Consentimiento sin romper la ejecución headless
 
 Editar ficheros que el usuario ha escrito exige permiso, pero pedirlo por consola rompería la llamada desde un orquestador headless como Syntony. Se resuelve por detección de TTY:

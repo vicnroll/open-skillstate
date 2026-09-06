@@ -4,6 +4,9 @@
 # Integrity record kept outside the state file (ADR 0009)
 .openskillstate/.integrity
 
+# `installed.json` is NOT ignored: it records what init wrote into
+# .claude/settings.json, and the team needs it to uninstall (ADR 0012)
+
 .DS_Store
 
 # Configuración local de herramientas ajenas al proyecto

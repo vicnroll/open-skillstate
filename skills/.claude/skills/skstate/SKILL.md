@@ -24,6 +24,8 @@ Before substantial work:
 skstate get
 ```
 
+It returns compact single-line JSON — the state with empty fields omitted, so an absent field means empty, not missing. It is a rendered view, not the file; `--pretty` indents it and `--raw` dumps the file itself.
+
 Compare the user's latest request against what comes back. If it is the same objective, reconcile with the current repository and continue from `next_action`. If it is a different objective, or state is `idle`/`completed`, reinitialize for the new task. The user's latest instruction and the current repository always win over stale state.
 
 ## Changing state
@@ -55,7 +57,11 @@ Collections (`facts`, `decisions`, `blockers`, `constraints`, `files.*`) are obj
 - derive it from the item itself — `auth-in-middleware`, `api-must-stay-compatible`
 - reuse the same slug when restating the same item, so the write is idempotent instead of creating a near-duplicate
 
-The CLI rejects keys that do not match the pattern.
+The CLI **normalises typography for you**: it lowercases, turns `_` into `-`, strips accents and collapses stray hyphens, so `Staging_DB_Unreachable` is stored as `staging-db-unreachable`. Write it properly anyway — you will read the canonical form back from `get`, and matching it is what keeps rewrites idempotent.
+
+What it will **not** fix, because fixing it would mean deciding for you: a slug longer than four words. `handle-rate-limit-errors-gracefully` is rejected, not truncated — shorten it yourself to `rate-limit-handling`.
+
+Two keys in one patch that normalise to the same slug are rejected together, rather than one silently overwriting the other. Patches apply whole or not at all.
 
 ## The state shape
 
@@ -111,6 +117,10 @@ EOF
 ```
 
 Leave the completed state in place. It gets reinitialized when a different objective starts.
+
+## Orchestrating parallel workers
+
+If you are dispatching workers rather than doing the work yourself — worktrees, parallel tasks, an integration step afterwards — read [`references/orchestration.md`](./references/orchestration.md) before you start. There is one thing to do when you create each worker, and skipping it corrupts the shared state silently.
 
 ## Fresh sessions
 
