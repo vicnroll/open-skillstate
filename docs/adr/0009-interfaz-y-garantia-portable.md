@@ -31,6 +31,24 @@ La consecuencia hay que decirla sin adornos: **un modelo que edite el fichero a 
 
 El modelo de amenaza no es un adversario intentando romper el sistema, sino un agente tomando un atajo. La propiedad portable que sí se puede sostener es que una siguiente operación del runtime no continúa silenciosamente sobre un documento que viola el esquema.
 
+### Qué bytes se hashean
+
+El hash se calcula sobre los **bytes exactos que `skstate` entrega a la escritura atómica de `.openskillstate/state.json`**, y la comprobación posterior calcula el hash directamente sobre los bytes leídos del fichero, sin parsearlo ni reserializarlo:
+
+```text
+serializar Σ una vez
+        ↓
+stateBytes
+   ├── atomic write → state.json
+   └── hash(stateBytes) → .integrity
+```
+
+El mecanismo comprueba igualdad byte a byte, así que **no depende del orden de las claves JSON, del comportamiento del codificador ni de una representación semántica reconstruida en memoria**. Reserializar el objeto para recalcular un hash "canónico" introduciría exactamente esas dependencias sin necesidad: la pregunta que el hash responde es «¿cambiaron los bytes desde la última escritura de `skstate`?», y esa pregunta se contesta comparando bytes, no reinterpretando JSON. Una representación persistida estable —útil para diffs reproducibles en Git— es una propiedad distinta y no un requisito de este mecanismo.
+
+`state.json` se escribe primero y `.integrity` después, ambos con la misma disciplina temp-sibling + `fsync` + `rename` atómico. El orden conserva una causalidad simple: un hash publicado siempre describe un `state.json` ya escrito de forma durable. Las dos escrituras no forman una transacción conjunta; si el proceso termina entre ambas, la siguiente operación observa un desajuste de hash. No hace falta journal ni *two-phase commit* para cubrir esa ventana: la política de esta misma sección ya la absorbe. Como `state.json` se sustituye atómicamente, la ventana nunca deja un documento a medio escribir — sólo puede dejar `.integrity` describiendo la escritura anterior. El desajuste se valida como cualquier otro, y como el documento en disco es válido por construcción, el resultado es como mucho un aviso de "cambio externo" por una operación propia interrumpida, nunca corrupción ni bloqueo. Se acepta ese falso positivo ocasional a cambio de no añadir complejidad transaccional que no resuelve ningún fallo real.
+
+La v1 usa **SHA-256**, disponible en la librería estándar de Go, sin dependencia adicional y de coste irrelevante sobre estados de pocos KiB ([ADR 0020](./0020-presupuesto-de-estado.md)). No es una elección de resistencia criptográfica: el modelo de amenaza de esta sección es un atajo, no un adversario construyendo colisiones deliberadas, así que un hash no criptográfico habría bastado igual. Se prefiere SHA-256 por disponibilidad y reconocibilidad, no porque la propiedad que ofrece haga falta.
+
 ## Claude Code: prevención adicional
 
 En Claude Code `init` instala una regla de proyecto:
@@ -59,9 +77,13 @@ Eso no obliga a desactivarla: puede contener conocimiento complementario o redun
 - **Los scripts o procesos auxiliares deben pasar por el CLI.** Si escriben `state.json` directamente pueden evitar la prevención específica de un cliente.
 - **OpenSkillState no promete exclusividad sobre el prompt.** El plano de contexto depende del runtime y de otras fuentes que éste cargue.
 - **Portabilidad de interfaz no equivale a portabilidad de enforcement.** La primera sí es objetivo del producto; la segunda se documenta por cliente.
+- **La ventana de crash entre `state.json` y `.integrity` es un comportamiento tolerado, no un defecto pendiente.** Como mucho produce un aviso de "cambio externo" sobre una operación propia interrumpida; nunca corrupción ni bloqueo, y no requiere journal ni escritura transaccional conjunta.
 
 ## Considered Options
 
 - **Aceptar la asimetría sin detección portable** — descartado: dejaría la propiedad central del estado dependiendo completamente del cliente.
 - **MCP como garantía portable** — descartado *como garantía*: la validación del *tool input* consigue que el parche llegue bien formado, no que sea el único camino de escritura.
 - **Desactivar memorias externas del cliente desde `init`** — descartado como política general: OpenSkillState no debe apropiarse de configuración que puede tener usos legítimos ajenos a Σ. Un modo estricto de un consumidor puede hacerlo de forma explícita.
+- **Recalcular el hash reserializando el objeto en memoria** — descartado: haría depender la integridad del orden de claves y del comportamiento del codificador, justo lo que hashear bytes literales evita sin esfuerzo.
+- **Escritura transaccional conjunta de `state.json` y `.integrity`** — descartado: la política de validar-y-rebasear ante un desajuste ya absorbe la única ventana de crash posible; añadir un protocolo de dos fases resolvería un fallo que no existe.
+- **Hash no criptográfico (xxHash u otro)** — considerado válido dado el modelo de amenaza, pero se prefiere SHA-256 por estar en la librería estándar de Go y no exigir justificar una elección menos reconocible, sin que la diferencia de coste importe a este tamaño de estado.

@@ -24,7 +24,8 @@
     "canonicalizacion-post-merge": "patch aplica RFC 7386 y después restaura la forma canónica de los campos core antes de validar y escribir",
     "overall-derivado": "verification.checks se promociona; verification.overall lo recalcula el runtime y los parches no pueden escribirlo",
     "git-sin-merge-textual": "state.json está versionado pero .gitattributes lo marca -merge; una divergencia de ramas falla ruidoso y se resuelve mediante skstate merge",
-    "budget-observable-v1": "check mide bytes de Sigma y composición por colecciones desde v1; no hay límite universal, pero --budget-bytes permite advertencias con un presupuesto explícito"
+    "budget-observable-v1": "check mide bytes de Sigma y composición por colecciones desde v1; no hay límite universal, pero --budget-bytes permite advertencias con un presupuesto explícito",
+    "integridad-por-bytes-literales": "El hash de .integrity se calcula sobre los bytes exactos escritos y leídos de state.json, nunca reserializando; state.json se escribe antes que .integrity y la ventana de crash entre ambos es tolerada por la política de validar-y-rebasear. Algoritmo: SHA-256, elegido por disponibilidad en la librería estándar y no por necesidad criptográfica"
   },
   "files": {
     "relevant": {
