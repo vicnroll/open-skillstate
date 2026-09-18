@@ -48,6 +48,124 @@ El plano de estado se implementa completo y es portable. El de contexto **no pue
 
 Una ejecución fresca lanzada por un runtime externo sí puede eliminar la **dependencia de la transcripción anterior**, pero eso no significa que Σ sea literalmente lo único en el prompt. Por ejemplo, Claude Code carga Auto Memory al iniciar conversaciones y la comparte entre worktrees del mismo repositorio. OpenSkillState no la desactiva por defecto: es contexto externo al producto, potencialmente complementario o redundante con Σ ([ADR 0009](./adr/0009-interfaz-y-garantia-portable.md)).
 
+
+## Vista lógica de la arquitectura
+
+El siguiente diagrama resume la arquitectura v1 y los principales caminos de ejecución. Los bloques del **runtime lógico** describen responsabilidades que debe implementar `skstate`; no implican que existan ya como paquetes o módulos separados en el código, porque la v1 sigue en fase de diseño.
+
+```mermaid
+flowchart TD
+
+subgraph actors["External actors / clients"]
+  agent(("Coding Agent"))
+  orchestrator(("Orchestrator / Runtime"))
+  git(("Git"))
+end
+
+subgraph cli["skstate CLI — core execution paths"]
+  skstate["skstate CLI"]
+  init["init"]
+  patch["patch"]
+  get["get"]
+  merge["merge"]
+  check["check"]
+end
+
+subgraph runtime["Logical state runtime"]
+  identity["Identity initialization"]
+  normalize["Normalize slugs<br/>+ detect collisions"]
+  apply["RFC 7386<br/>Merge Patch"]
+  canonicalize["Canonicalize<br/>core state"]
+  derive["Recompute<br/>derived fields"]
+  validate["Validate<br/>embedded schema"]
+  promote["Promotion engine<br/>x-promote"]
+  render["State renderer<br/>tiers"]
+  integrity["Integrity check"]
+  lock["Exclusive file lock"]
+  atomic["Atomic persistence"]
+end
+
+subgraph repo["Repository / workspace"]
+  state[("Consolidated state<br/>.openskillstate/state.json")]
+  worker[("Isolated worker state<br/>.openskillstate/worker-state.json")]
+  gitpolicy["Git merge policy<br/>.gitattributes"]
+  skill["Agent skill guidance<br/>SKILL.md"]
+  permissions["Client integration<br/>permissions + hooks"]
+end
+
+subgraph local["Local machine — outside repository"]
+  history[("SQLite history<br/>keyed by project_id")]
+end
+
+agent -->|"invokes"| skstate
+orchestrator -->|"may invoke / automate"| skstate
+agent -.->|"reads"| skill
+agent -.->|"constrained where supported"| permissions
+
+skstate --> init
+skstate --> patch
+skstate --> get
+skstate --> merge
+skstate --> check
+
+init --> identity
+identity --> lock
+init --> gitpolicy
+init --> skill
+init --> permissions
+
+patch --> normalize
+normalize --> apply
+apply --> canonicalize
+canonicalize --> derive
+derive --> validate
+validate --> lock
+
+merge --> promote
+worker -->|"source"| promote
+state -->|"destination"| promote
+promote --> derive
+
+get --> render
+state --> render
+
+check --> integrity
+state --> integrity
+check --> render
+
+lock --> atomic
+atomic --> state
+atomic -.->|"records events / metrics"| history
+identity -.->|"project_id"| history
+
+git -->|"consults"| gitpolicy
+gitpolicy -->|"prevents textual merge"| state
+
+click skstate "https://github.com/vicnroll/open-skillstate/blob/main/README.md"
+click validate "https://github.com/vicnroll/open-skillstate/blob/main/schema/v1.json"
+click state "https://github.com/vicnroll/open-skillstate/blob/main/.openskillstate/state.json"
+click gitpolicy "https://github.com/vicnroll/open-skillstate/blob/main/.gitattributes"
+click skill "https://github.com/vicnroll/open-skillstate/blob/main/skills/.agents/skills/skstate/SKILL.md"
+click history "https://github.com/vicnroll/open-skillstate/blob/main/docs/adr/0017-historico-local-inalcanzable-desde-el-agente.md"
+click permissions "https://github.com/vicnroll/open-skillstate/blob/main/docs/arquitectura.md"
+
+classDef actor fill:#dbeafe,stroke:#2563eb,stroke-width:1.5px,color:#172554
+classDef command fill:#fef3c7,stroke:#d97706,stroke-width:1.5px,color:#78350f
+classDef runtime fill:#dcfce7,stroke:#16a34a,stroke-width:1.5px,color:#14532d
+classDef persistence fill:#ffe4e6,stroke:#e11d48,stroke-width:1.5px,color:#881337
+classDef integration fill:#e0e7ff,stroke:#4f46e5,stroke-width:1.5px,color:#312e81
+classDef externalstore fill:#ccfbf1,stroke:#0f766e,stroke-width:1.5px,color:#134e4a
+
+class agent,orchestrator,git actor
+class skstate,init,patch,get,merge,check command
+class identity,normalize,apply,canonicalize,derive,validate,promote,render,integrity,lock,atomic runtime
+class state,worker persistence
+class gitpolicy,skill,permissions integration
+class history externalstore
+```
+
+El diagrama separa deliberadamente el **estado del repositorio** del histórico local: `state.json` es continuidad durable y versionada; el `worker-state.json` pertenece a una ejecución aislada; el histórico se almacena fuera del repositorio y se relaciona mediante `project_id`. El orquestador aparece como consumidor posible de la CLI, no como dependencia del núcleo.
+
 ---
 
 ## El plano de estado
